@@ -1,0 +1,13 @@
+* text=auto
+*.go text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+Makefile text eol=lf
+scripts/* text eol=lf
+package/Dockerfile text eol=lf
+package/*.sh text eol=lf
+package/update-platform-ca text eol=lf
+
+LICENSE text eol=crlf
+LICENSES/** text eol=lf

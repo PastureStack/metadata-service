@@ -1,7 +1,7 @@
 package main
 
 import (
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
 	"reflect"
 	"strconv"
 	"strings"
@@ -97,7 +97,7 @@ func valueForPath(in *interface{}, path []string) (interface{}, bool) {
 
 		default:
 			t := reflect.TypeOf(out)
-			log.Debug("Unknown type %s at /%s", t.String(), path)
+			log.Debugf("Unknown type %s at /%s", t.String(), path)
 		}
 
 		if valid == false {

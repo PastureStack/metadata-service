@@ -9,14 +9,14 @@
       ips:
       - 10.42.75.49
       labels:
-        io.rancher.project.name: Default
-        io.rancher.container.pull_image: always
-        io.rancher.service.deployment.unit: 38d01516-d784-4fe6-84ef-e25935d376cd
-        io.rancher.service.launch.config: io.rancher.service.primary.launch.config
-        io.rancher.project_service.name: Default/alena
-        io.rancher.scheduler.affinity:container_label_soft: io.rancher.service.deployment.unit=38d01516-d784-4fe6-84ef-e25935d376cd
-        io.rancher.stack.name: Default
-        io.rancher.stack_service.name: Default/alena
+        io.pasturestack.project.name: Default
+        io.pasturestack.container.pull_image: always
+        io.pasturestack.service.deployment.unit: 38d01516-d784-4fe6-84ef-e25935d376cd
+        io.pasturestack.service.launch.config: io.pasturestack.service.primary.launch.config
+        io.pasturestack.project_service.name: Default/alena
+        io.pasturestack.scheduler.affinity:container_label_soft: io.pasturestack.service.deployment.unit=38d01516-d784-4fe6-84ef-e25935d376cd
+        io.pasturestack.stack.name: Default
+        io.pasturestack.stack_service.name: Default/alena
       name: Default_alena_1
       ports: []
       primary_ip: 10.42.75.49
@@ -44,8 +44,8 @@
     - agent_ip: 127.0.0.1
       hostId: 1
       labels:
-        io.rancher.host.linux_kernel_version: '4.1'
-        io.rancher.host.docker_version: '1.9'
+        io.pasturestack.host.linux_kernel_version: '4.1'
+        io.pasturestack.host.docker_version: '1.9'
       name: default
       uuid: 515ef0f5-9826-4b07-b041-db0785098661
     services:
@@ -58,7 +58,7 @@
       hostname: null
       kind: service
       labels: &id005
-        io.rancher.container.pull_image: always
+        io.pasturestack.container.pull_image: always
       links: &id006 {}
       metadata: *id002
       name: alena
@@ -98,8 +98,8 @@
         agent_ip: 127.0.0.1
         hostId: 1
         labels:
-          io.rancher.host.linux_kernel_version: '4.1'
-          io.rancher.host.docker_version: '1.9'
+          io.pasturestack.host.linux_kernel_version: '4.1'
+          io.pasturestack.host.docker_version: '1.9'
         name: default
         uuid: 515ef0f5-9826-4b07-b041-db0785098661
       service: *id009
@@ -114,8 +114,8 @@
         agent_ip: 127.0.0.1
         hostId: 1
         labels:
-          io.rancher.host.linux_kernel_version: '4.1'
-          io.rancher.host.docker_version: '1.9'
+          io.pasturestack.host.linux_kernel_version: '4.1'
+          io.pasturestack.host.docker_version: '1.9'
         name: default
         uuid: 515ef0f5-9826-4b07-b041-db0785098661
       service: null
@@ -129,8 +129,8 @@ latest: *id011
     - agent_ip: 127.0.0.1
       hostId: 1
       labels:
-        io.rancher.host.linux_kernel_version: '4.1'
-        io.rancher.host.docker_version: '1.9'
+        io.pasturestack.host.linux_kernel_version: '4.1'
+        io.pasturestack.host.docker_version: '1.9'
       name: default
       uuid: 515ef0f5-9826-4b07-b041-db0785098661
     services:

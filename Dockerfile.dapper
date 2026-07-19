@@ -1,15 +1,49 @@
-FROM golang:1.8.3
-RUN go get github.com/rancher/trash
-RUN go get github.com/golang/lint/golint
-RUN curl -sL https://get.docker.com/builds/Linux/x86_64/docker-1.9.1 > /usr/bin/docker && \
-    chmod +x /usr/bin/docker
-ENV PATH /go/bin:$PATH
-ENV DAPPER_SOURCE /go/src/github.com/rancher/rancher-metadata
-ENV DAPPER_OUTPUT bin dist
-ENV DAPPER_DOCKER_SOCKET true
-ENV DAPPER_ENV TAG REPO
-ENV GO15VENDOREXPERIMENT 1
-ENV TRASH_CACHE ${DAPPER_SOURCE}/.trash-cache
+FROM ubuntu:26.04
+
+ARG DAPPER_HOST_ARCH=amd64
+ARG GO_VERSION=1.26.5
+ARG GO_LINUX_AMD64_SHA256=5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053
+ARG UBUNTU_MIRROR=http://archive.ubuntu.com/ubuntu
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV HOST_ARCH=${DAPPER_HOST_ARCH} ARCH=${DAPPER_HOST_ARCH}
+
+RUN set -eux; \
+    find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -exec sed -i \
+        -e "s|http://security.ubuntu.com/ubuntu|${UBUNTU_MIRROR}|g" \
+        -e "s|http://archive.ubuntu.com/ubuntu|${UBUNTU_MIRROR}|g" {} +; \
+    printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\nAcquire::http::Pipeline-Depth "0";\n' > /etc/apt/apt.conf.d/80pasturestack-retries; \
+    apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        bash ca-certificates curl file gcc git libc6-dev make tar xz-utils && \
+    rm -rf /var/lib/apt/lists/* && \
+    rm -f /usr/bin/pebble && \
+    rm -f /bin/sh && ln -s /bin/bash /bin/sh
+
+RUN case "${DAPPER_HOST_ARCH}" in \
+        amd64) go_arch=amd64; go_sha="${GO_LINUX_AMD64_SHA256}" ;; \
+        *) echo "unsupported DAPPER_HOST_ARCH=${DAPPER_HOST_ARCH}" >&2; exit 1 ;; \
+    esac && \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 10 --max-time 300 \
+        -o /tmp/go.tgz "https://go.dev/dl/go${GO_VERSION}.linux-${go_arch}.tar.gz" && \
+    echo "${go_sha}  /tmp/go.tgz" | sha256sum -c - && \
+    tar -xzf /tmp/go.tgz -C /usr/local && \
+    rm -f /tmp/go.tgz && \
+    /usr/local/go/bin/go version
+
+ENV GOPATH=/go \
+    PATH=/go/bin:/usr/local/go/bin:/usr/local/bin:${PATH} \
+    SHELL=/bin/bash \
+    GO111MODULE=on \
+    GOCACHE=/tmp/go-build-cache \
+    GOMODCACHE=/tmp/go-module-cache \
+    GOTELEMETRY=off \
+    XDG_CONFIG_HOME=/tmp/go-config \
+    GIT_CONFIG_GLOBAL=/tmp/gitconfig \
+    DAPPER_SOURCE=/go/src/github.com/PastureStack/metadata-service
+
 WORKDIR ${DAPPER_SOURCE}
+RUN git config --system --add safe.directory ${DAPPER_SOURCE}
+
 ENTRYPOINT ["./scripts/entry"]
 CMD ["ci"]

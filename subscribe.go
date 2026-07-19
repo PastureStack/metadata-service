@@ -6,43 +6,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
+	"net/url"
 	"os"
-	"reflect"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
-	"github.com/Sirupsen/logrus"
-	"github.com/juju/ratelimit"
-	"github.com/mitchellh/mapstructure"
-	revents "github.com/rancher/event-subscriber/events"
-	"github.com/rancher/go-rancher/v2"
-	"github.com/rancher/rancher-metadata/pkg/kicker"
-	"github.com/ugorji/go/codec"
+	"github.com/PastureStack/metadata-service/internal/platformevents"
+	"github.com/PastureStack/metadata-service/pkg/kicker"
+	"github.com/sirupsen/logrus"
 )
+
+const maxCompressedDeltaBytes int64 = 64 << 20
 
 type ReloadFunc func(versions Versions)
 
 var (
-	Delta        *MetadataDelta
-	SavedVersion string
-	jsonHandle   = &codec.JsonHandle{
-		BasicHandle: codec.BasicHandle{
-			DecodeOptions: codec.DecodeOptions{
-				InternString: true,
-				MapType:      reflect.TypeOf(map[string]interface{}{}),
-			},
-		},
-	}
-	decoder = &MetadataDecoder{}
+	Delta          *MetadataDelta
+	SavedVersion   string
+	deltaDecoderMu sync.Mutex
 )
-
-type MetadataDecoder struct {
-	decoder *codec.Decoder
-	sync.Mutex
-}
 
 type Subscriber struct {
 	url            string
@@ -51,124 +36,134 @@ type Subscriber struct {
 	reload         ReloadFunc
 	answerFile     string
 	client         *http.Client
+	platformClient *platformevents.Client
 	kicker         *kicker.Kicker
 	reloadInterval int64
-	limiter        *ratelimit.Bucket
+	limitMu        sync.Mutex
+	nextReload     time.Time
 }
 
 func init() {
-	Delta = &MetadataDelta{
-		Version: "0",
-	}
+	Delta = &MetadataDelta{Version: "0"}
 }
 
-func NewSubscriber(url, accessKey, secretKey, answerFile string, reloadInterval int64, reload ReloadFunc) *Subscriber {
+func NewSubscriber(rawURL, accessKey, secretKey, answerFile string, reloadInterval int64, reload ReloadFunc) (*Subscriber, error) {
+	platformClient, err := platformevents.NewClient(rawURL, accessKey, secretKey)
+	if err != nil {
+		return nil, err
+	}
 	s := &Subscriber{
-		url:            url,
+		url:            platformClient.ConfigurationBaseURL(),
 		accessKey:      accessKey,
 		secretKey:      secretKey,
 		reload:         reload,
 		answerFile:     answerFile,
-		client:         &http.Client{},
+		client:         &http.Client{Timeout: 30 * time.Second},
+		platformClient: platformClient,
 		reloadInterval: reloadInterval,
-		limiter:        ratelimit.NewBucketWithQuantum(time.Duration(reloadInterval)*time.Millisecond, 1.0, 1),
 	}
 	s.kicker = kicker.New(func() {
 		if err := s.downloadAndReload(); err != nil {
 			logrus.Errorf("Failed to download and reload metadata: %v", err)
 		}
 	})
-	return s
+	return s, nil
 }
 
 func (s *Subscriber) Subscribe() error {
-	handlers := map[string]revents.EventHandler{
+	handlers := map[string]platformevents.Handler{
 		"ping":          s.noOp,
 		"config.update": s.configUpdate,
 	}
 
-	router, err := revents.NewEventRouter("", 0, s.url, s.accessKey, s.secretKey, nil, handlers, "", 3, revents.DefaultPingConfig)
-	if err != nil {
-		return err
-	}
-
 	go func() {
-		sp := revents.SkippingWorkerPool(3, nil)
 		for {
 			s.kicker.Kick()
-			if err := router.RunWithWorkerPool(sp); err != nil {
-				logrus.Errorf("Exiting subscriber: %v", err)
+			if err := s.platformClient.Run(handlers); err != nil {
+				logrus.Errorf("Platform event stream exited: %v", err)
 			}
 			time.Sleep(time.Second)
 		}
 	}()
 
 	go func() {
-		for t := range time.Tick(30 * time.Second) {
-			s.saveToFile(t)
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for tick := range ticker.C {
+			s.saveToFile(tick)
 		}
 	}()
 
 	return nil
 }
 
-func (s *Subscriber) noOp(event *revents.Event, c *client.RancherClient) error {
+func (s *Subscriber) noOp(_ *platformevents.Event, _ *platformevents.Client) error {
 	return nil
 }
 
-func (s *Subscriber) configUpdate(event *revents.Event, c *client.RancherClient) error {
+func (s *Subscriber) configUpdate(event *platformevents.Event, client *platformevents.Client) error {
+	encoded, err := json.Marshal(event.Data)
+	if err != nil {
+		return err
+	}
 	update := ConfigUpdateData{}
-	if err := mapstructure.Decode(event.Data, &update); err != nil {
+	if err := json.Unmarshal(encoded, &update); err != nil {
 		return err
 	}
 
-	found := false
-	i := 0
 	for _, item := range update.Items {
-		if found = item.Name == "metadata-answers"; found {
+		if item.Name == "metadata-answers" {
 			logrus.Infof("Update requested for version: %d", item.RequestedVersion)
 			SetRequestedVersion(strconv.Itoa(item.RequestedVersion))
-			i = s.kicker.Kick()
+			generation := s.kicker.Kick()
+			s.kicker.Wait(generation)
 			break
 		}
 	}
 
-	if i > 0 {
-		s.kicker.Wait(i)
+	if event.ReplyTo == "" {
+		return nil
 	}
-
-	_, err := c.Publish.Create(&client.Publish{
+	return client.Publish(&platformevents.Publish{
 		Name:        event.ReplyTo,
-		PreviousIds: []string{event.ID},
+		PreviousIDs: []string{event.ID},
 	})
-	return err
 }
 
 func (s *Subscriber) saveDeltaToFile() error {
 	tempFile := s.answerFile + ".temp"
-	out, err := os.Create(tempFile)
+	out, err := os.OpenFile(tempFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
+	removeTemp := true
 	defer func() {
-		out.Close()
-		os.Remove(tempFile)
+		if removeTemp {
+			_ = os.Remove(tempFile)
+		}
 	}()
 
-	err = json.NewEncoder(out).Encode(Delta)
-	if err != nil {
+	if err := json.NewEncoder(out).Encode(Delta); err != nil {
+		_ = out.Close()
 		return err
 	}
-
-	os.Rename(tempFile, s.answerFile)
+	if err := out.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tempFile, s.answerFile); err != nil {
+		return fmt.Errorf("replace answers file: %w", err)
+	}
+	removeTemp = false
 	return nil
 }
 
 func (s *Subscriber) downloadAndReload() error {
-	s.limiter.WaitMaxDuration(1, time.Duration(s.reloadInterval)*time.Millisecond)
-	url := s.url + "/configcontent/metadata-answers?client=v2&requestedVersion=" + GetRequestedVersion()
-	// 1. Download meta
-	req, err := http.NewRequest("GET", url, nil)
+	s.waitForReloadWindow()
+	downloadURL, err := s.configContentURL(GetRequestedVersion(), "")
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodGet, downloadURL, nil)
 	if err != nil {
 		return err
 	}
@@ -179,103 +174,120 @@ func (s *Subscriber) downloadAndReload() error {
 		return err
 	}
 	defer resp.Body.Close()
-	logrus.Infof("Downloaded in %s", time.Since(start))
-
-	if resp.StatusCode != 200 {
-		content, _ := ioutil.ReadAll(resp.Body)
-		return fmt.Errorf("non-200 response %d: %s", resp.StatusCode, content)
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download metadata: unexpected status %d", resp.StatusCode)
 	}
+	logrus.Infof("Downloaded metadata in %s", time.Since(start))
 
-	// 2. Decode the delta
-	logrus.Infof("Generating and reloading answers")
 	delta, err := GenerateDelta(resp.Body)
 	if err != nil {
-		logrus.Errorf("Failed to decode delta")
-		return err
+		return fmt.Errorf("decode metadata delta: %w", err)
 	}
-
-	logrus.Infof("Generating answers")
-	// 3. Geneate answers
 	versions, err := GenerateAnswers(delta)
 	if err != nil {
-		logrus.Errorf("Failed to generate answers")
+		return fmt.Errorf("generate metadata answers: %w", err)
+	}
+	s.reload(versions)
+
+	defaults, ok := versions["latest"]["default"].(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("metadata response has no default version")
+	}
+	version, ok := defaults["version"].(string)
+	if !ok || version == "" {
+		return fmt.Errorf("metadata response has no applied version")
+	}
+	appliedURL, err := s.configContentURL("", version)
+	if err != nil {
 		return err
 	}
-
-	// 4. Reload
-	s.reload(versions)
-	logrus.Infof("Generated and reloaded answers")
-
-	// 5. Generate a reply
-	def, ok := versions["latest"]["default"].(map[string]interface{})
-	if ok {
-		version, _ := def["version"].(string)
-		logrus.Infof("Applied %s", url+"?version="+version)
-		req, err := http.NewRequest("PUT", url+"?client=v2&version="+version, nil)
-		if err != nil {
-			return err
-		}
-
-		req.SetBasicAuth(s.accessKey, s.secretKey)
-		resp, err := s.client.Do(req)
-		if err != nil {
-			return err
-		}
-		if resp.Body != nil {
-			resp.Body.Close()
-		}
-	} else {
-		return fmt.Errorf("Failed to locate default version")
+	applyRequest, err := http.NewRequest(http.MethodPut, appliedURL, nil)
+	if err != nil {
+		return err
 	}
-
-	logrus.Infof("Download and reload in: %v", time.Since(start))
-
+	applyRequest.SetBasicAuth(s.accessKey, s.secretKey)
+	applyResponse, err := s.client.Do(applyRequest)
+	if err != nil {
+		return err
+	}
+	if applyResponse.Body != nil {
+		applyResponse.Body.Close()
+	}
+	if applyResponse.StatusCode < 200 || applyResponse.StatusCode >= 300 {
+		return fmt.Errorf("report applied metadata version: unexpected status %d", applyResponse.StatusCode)
+	}
+	logrus.Infof("Applied metadata version %s in %v", version, time.Since(start))
 	return nil
 }
 
+func (s *Subscriber) waitForReloadWindow() {
+	s.limitMu.Lock()
+	defer s.limitMu.Unlock()
+	now := time.Now()
+	if now.Before(s.nextReload) {
+		time.Sleep(s.nextReload.Sub(now))
+	}
+	s.nextReload = time.Now().Add(time.Duration(s.reloadInterval) * time.Millisecond)
+}
+
+func (s *Subscriber) configContentURL(requestedVersion, appliedVersion string) (string, error) {
+	u, err := url.Parse(s.url)
+	if err != nil {
+		return "", err
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + "/configcontent/metadata-answers"
+	query := u.Query()
+	query.Set("client", "v2")
+	if requestedVersion != "" {
+		query.Set("requestedVersion", requestedVersion)
+	}
+	if appliedVersion != "" {
+		query.Set("version", appliedVersion)
+	}
+	u.RawQuery = query.Encode()
+	return u.String(), nil
+}
+
 type ConfigUpdateData struct {
-	ConfigUrl string
-	Items     []ConfigUpdateItem
+	ConfigURL string             `json:"configUrl"`
+	Items     []ConfigUpdateItem `json:"items"`
 }
 
 type ConfigUpdateItem struct {
-	Name             string
-	RequestedVersion int
+	Name             string `json:"name"`
+	RequestedVersion int    `json:"requestedVersion"`
 }
 
 func GenerateDelta(body io.Reader) ([]map[string]interface{}, error) {
-	content, err := ioutil.ReadAll(body)
+	content, err := io.ReadAll(io.LimitReader(body, maxCompressedDeltaBytes+1))
 	if err != nil {
 		return nil, err
 	}
-
-	r := flate.NewReader(bytes.NewBuffer(content))
-
-	defer r.Close()
-
-	decoder.Lock()
-	defer decoder.Unlock()
-
-	if decoder.decoder == nil {
-		decoder.decoder = codec.NewDecoder(r, jsonHandle)
-	} else {
-		decoder.decoder.Reset(r)
+	if int64(len(content)) > maxCompressedDeltaBytes {
+		return nil, fmt.Errorf("compressed metadata delta exceeds %d bytes", maxCompressedDeltaBytes)
 	}
+
+	reader := flate.NewReader(bytes.NewBuffer(content))
+	defer reader.Close()
+	deltaDecoderMu.Lock()
+	defer deltaDecoderMu.Unlock()
+	streamDecoder := json.NewDecoder(reader)
 
 	var data []map[string]interface{}
 	var version string
 	for {
-		var o map[string]interface{}
-		err := decoder.decoder.Decode(&o)
+		var object map[string]interface{}
+		err := streamDecoder.Decode(&object)
 		if err == io.EOF {
 			break
-		} else if err != nil {
+		}
+		if err != nil {
 			return nil, err
-		} else {
-			data = append(data, o)
-			kind := o["metadata_kind"]
-			if kind == "defaultData" {
-				version = o["version"].(string)
+		}
+		data = append(data, object)
+		if object["metadata_kind"] == "defaultData" {
+			if objectVersion, ok := object["version"].(string); ok {
+				version = objectVersion
 			}
 		}
 	}
@@ -290,17 +302,17 @@ func reloadDelta(version string, data []byte) {
 	Delta.Data = data
 }
 
-func (s *Subscriber) saveToFile(t time.Time) {
+func (s *Subscriber) saveToFile(tick time.Time) {
 	Delta.Lock()
 	defer Delta.Unlock()
 	currentVersion := Delta.Version
-	if SavedVersion != Delta.Version && len(Delta.Data) > 0 {
-		err := s.saveDeltaToFile()
-		if err != nil {
-			logrus.Errorf("Failed to save delta to file: [%v]", err)
-		} else {
-			SavedVersion = currentVersion
-			logrus.Debugf("Saved delta to file at [%v]", t)
-		}
+	if SavedVersion == currentVersion || len(Delta.Data) == 0 {
+		return
 	}
+	if err := s.saveDeltaToFile(); err != nil {
+		logrus.Errorf("Failed to save delta to file: %v", err)
+		return
+	}
+	SavedVersion = currentVersion
+	logrus.Debugf("Saved delta to file at %v", tick)
 }

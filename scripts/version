@@ -1,5 +1,12 @@
 #!/bin/bash
 
+if [ -n "${VERSION_OVERRIDE:-}" ]; then
+    VERSION="$VERSION_OVERRIDE"
+elif [ -n "${RELEASE_VERSION:-}" ]; then
+    VERSION="$RELEASE_VERSION"
+else
+
+DIRTY=
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
     DIRTY="-dirty"
 fi
@@ -13,6 +20,6 @@ else
     VERSION="${COMMIT}${DIRTY}"
 fi
 
-if [ -z "$ARCH" ]; then
-    ARCH=amd64
 fi
+
+ARCH=${ARCH:-amd64}
