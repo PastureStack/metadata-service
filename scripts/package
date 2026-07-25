@@ -1,23 +1,64 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -euo pipefail
 
-ARCH=${ARCH:-"amd64"}
-SUFFIX=""
-[ "${ARCH}" != "amd64" ] && SUFFIX="_${ARCH}"
+source "$(dirname "$0")/version"
 
-source $(dirname $0)/version
+repo_root=$(cd "$(dirname "$0")/.." && pwd)
+cd "${repo_root}"
 
-cd $(dirname $0)/../package
+ARCH=${ARCH:-amd64}
+test "${ARCH}" = amd64
+TAG=${TAG:-${VERSION}}
+REPO=${REPO:-ghcr.io/pasturestack}
+BUILDX_SHA256=${BUILDX_SHA256:?BUILDX_SHA256 not set}
+DOCKER_CLI_SHA256=${DOCKER_CLI_SHA256:?DOCKER_CLI_SHA256 not set}
 
-TAG=${TAG:-${VERSION}${SUFFIX}}
-REPO=${REPO:-rancher}
-
-if $(echo ${TAG} | grep -q dirty); then
+if [[ "${TAG}" == *dirty* ]]; then
     TAG=dev
 fi
 
-cp ../bin/rancher-metadata .
-docker build -t ${REPO}/metadata:${TAG} .
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "refusing to package a tracked dirty worktree" >&2
+    exit 1
+fi
 
-mkdir -p ../dist
-echo ${REPO}/metadata:${TAG} > ../dist/images
-echo Built ${REPO}/metadata:${TAG}
+SOURCE_REVISION=$(git rev-parse HEAD)
+IMAGE_CREATED=$(git show -s --format=%cI HEAD)
+
+echo "${BUILDX_SHA256}  /usr/local/lib/docker/cli-plugins/docker-buildx" | sha256sum -c -
+echo "${DOCKER_CLI_SHA256}  /usr/local/bin/docker" | sha256sum -c -
+docker buildx version
+docker --version
+
+VERSION_OVERRIDE="${TAG}" ./scripts/build
+binary_version=$(./bin/metadata-service --version)
+if [ "${binary_version}" != "${TAG}" ]; then
+    echo "metadata-service version mismatch: expected ${TAG}, got ${binary_version}" >&2
+    exit 1
+fi
+
+context=$(mktemp -d)
+cleanup() {
+    rm -rf "${context}"
+}
+trap cleanup EXIT
+
+install -m 0644 package/Dockerfile "${context}/Dockerfile"
+install -m 0755 bin/metadata-service "${context}/metadata-service"
+install -m 0755 package/start.sh package/platform-entrypoint.sh package/update-platform-ca "${context}/"
+mkdir -p "${context}/licenses/third-party"
+install -m 0644 LICENSE COMPATIBILITY.md ORIGIN.md SECURITY.md THIRD_PARTY_NOTICES.md "${context}/licenses/"
+cp -a LICENSES/. "${context}/licenses/third-party/"
+
+IMAGE=${REPO}/metadata-service:${TAG}
+DOCKER_BUILDKIT=1 docker build \
+    --network "${DOCKER_BUILD_NETWORK:-host}" \
+    --build-arg UBUNTU_MIRROR="${UBUNTU_MIRROR:-http://archive.ubuntu.com/ubuntu}" \
+    --build-arg PASTURESTACK_IMAGE_VERSION="${TAG}" \
+    --build-arg PASTURESTACK_IMAGE_REVISION="${SOURCE_REVISION}" \
+    --build-arg PASTURESTACK_IMAGE_CREATED="${IMAGE_CREATED}" \
+    -t "${IMAGE}" "${context}"
+
+mkdir -p dist
+printf '%s\n' "${IMAGE}" > dist/images
+echo "Built ${IMAGE}"

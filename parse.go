@@ -3,38 +3,97 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 
-	log "github.com/Sirupsen/logrus"
+	log "github.com/sirupsen/logrus"
+	yaml "gopkg.in/yaml.v2"
 )
 
-func ParseAnswers(path string) (out Versions, err error) {
-	var v Versions
-	var md MetadataDelta
-	f, err := os.Open(path)
+const maxAnswersFileBytes int64 = 64 << 20
+
+func ParseAnswers(path string) (Versions, error) {
+	file, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Warn("Failed to find: ", path)
-			return v, nil
+			return nil, nil
 		}
 		return nil, err
 	}
-	defer f.Close()
+	defer file.Close()
 
-	err = json.NewDecoder(f).Decode(&md)
+	content, err := io.ReadAll(io.LimitReader(file, maxAnswersFileBytes+1))
 	if err != nil {
 		return nil, err
 	}
-
-	delta, err := GenerateDelta(bytes.NewBuffer(md.Data))
-	if err != nil {
-		return v, err
+	if int64(len(content)) > maxAnswersFileBytes {
+		return nil, fmt.Errorf("answers file exceeds %d bytes", maxAnswersFileBytes)
 	}
 
-	v, err = GenerateAnswers(delta)
-	if err != nil {
-		return v, err
+	var savedDelta MetadataDelta
+	if err := json.Unmarshal(content, &savedDelta); err == nil && len(savedDelta.Data) > 0 {
+		delta, err := GenerateDelta(bytes.NewReader(savedDelta.Data))
+		if err != nil {
+			return nil, err
+		}
+		return GenerateAnswers(delta)
 	}
 
-	return v, err
+	versions := Versions{}
+	if err := json.Unmarshal(content, &versions); err == nil && len(versions) > 0 {
+		return versions, nil
+	}
+
+	var yamlValue interface{}
+	if err := yaml.Unmarshal(content, &yamlValue); err != nil {
+		return nil, fmt.Errorf("decode answers as JSON or YAML: %w", err)
+	}
+	normalized, err := normalizeYAMLValue(yamlValue)
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(encoded, &versions); err != nil {
+		return nil, err
+	}
+	if len(versions) == 0 {
+		return nil, fmt.Errorf("answers file has no versions")
+	}
+	return versions, nil
+}
+
+func normalizeYAMLValue(value interface{}) (interface{}, error) {
+	switch typed := value.(type) {
+	case map[interface{}]interface{}:
+		result := make(map[string]interface{}, len(typed))
+		for key, child := range typed {
+			stringKey, ok := key.(string)
+			if !ok {
+				return nil, fmt.Errorf("answers file contains a non-string map key")
+			}
+			normalized, err := normalizeYAMLValue(child)
+			if err != nil {
+				return nil, err
+			}
+			result[stringKey] = normalized
+		}
+		return result, nil
+	case []interface{}:
+		result := make([]interface{}, len(typed))
+		for index, child := range typed {
+			normalized, err := normalizeYAMLValue(child)
+			if err != nil {
+				return nil, err
+			}
+			result[index] = normalized
+		}
+		return result, nil
+	default:
+		return value, nil
+	}
 }

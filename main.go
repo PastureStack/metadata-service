@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -17,10 +19,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Sirupsen/logrus"
-	"github.com/codegangsta/cli"
-	"github.com/golang/gddo/httputil"
 	"github.com/gorilla/mux"
+	"github.com/sirupsen/logrus"
 	yaml "gopkg.in/yaml.v2"
 )
 
@@ -58,93 +58,89 @@ type ServerConfig struct {
 }
 
 func main() {
-	app := getCliApp()
-	app.Action = appMain
-	app.Run(os.Args)
-}
-
-func getCliApp() *cli.App {
-	app := cli.NewApp()
-	app.Version = VERSION
-	app.Flags = []cli.Flag{
-		cli.BoolFlag{
-			Name:  "debug",
-			Usage: "Debug",
-		},
-		cli.BoolFlag{
-			Name:  "xff",
-			Usage: "X-Forwarded-For header support",
-		},
-		cli.StringFlag{
-			Name:  "listen",
-			Value: ":80",
-			Usage: "Address to listen to (TCP)",
-		},
-		cli.StringFlag{
-			Name:  "listenReload",
-			Value: "127.0.0.1:8112",
-			Usage: "Address to listen to for reload requests (TCP)",
-		},
-		cli.StringFlag{
-			Name:  "answers",
-			Value: "./answers.json",
-			Usage: "File containing the answers to respond with",
-		},
-		cli.StringFlag{
-			Name:  "log",
-			Value: "",
-			Usage: "Log file",
-		},
-		cli.StringFlag{
-			Name:  "pid-file",
-			Value: "",
-			Usage: "PID to write to",
-		},
-		cli.BoolFlag{
-			Name:  "subscribe",
-			Usage: "Subscribe to Rancher events",
-		},
-		cli.Int64Flag{
-			Name:  "reload-interval-limit",
-			Usage: "Limits reload to 1 per interval (milliseconds)",
-			Value: 1000,
-		},
+	options, err := parseOptions(os.Args[1:])
+	if errors.Is(err, flag.ErrHelp) {
+		return
 	}
-
-	return app
+	if err != nil {
+		logrus.Fatal(err)
+	}
+	if options.showVersion {
+		fmt.Println(VERSION)
+		return
+	}
+	if err := appMain(options); err != nil {
+		logrus.Fatal(err)
+	}
 }
 
-func appMain(ctx *cli.Context) error {
-	if ctx.GlobalBool("debug") {
+type appOptions struct {
+	debug               bool
+	enableXff           bool
+	listen              string
+	listenReload        string
+	answersFile         string
+	logFile             string
+	pidFile             string
+	subscribe           bool
+	reloadIntervalLimit int64
+	showVersion         bool
+}
+
+func parseOptions(args []string) (appOptions, error) {
+	options := appOptions{}
+	flags := flag.NewFlagSet("metadata-service", flag.ContinueOnError)
+	flags.BoolVar(&options.debug, "debug", false, "enable debug logging")
+	flags.BoolVar(&options.enableXff, "xff", false, "trust X-Forwarded-For when selecting client answers")
+	flags.StringVar(&options.listen, "listen", ":80", "HTTP listen address")
+	flags.StringVar(&options.listenReload, "listen-reload", "127.0.0.1:8112", "reload API listen address")
+	flags.StringVar(&options.answersFile, "answers", "./answers.json", "JSON or YAML answers file")
+	flags.StringVar(&options.logFile, "log", "", "optional log file")
+	flags.StringVar(&options.pidFile, "pid-file", "", "optional PID file")
+	flags.BoolVar(&options.subscribe, "subscribe", false, "subscribe to platform configuration events")
+	flags.Int64Var(&options.reloadIntervalLimit, "reload-interval-limit", 1000, "minimum reload interval in milliseconds")
+	flags.BoolVar(&options.showVersion, "version", false, "print the version and exit")
+	if err := flags.Parse(args); err != nil {
+		return appOptions{}, err
+	}
+	if options.reloadIntervalLimit < 1 {
+		return appOptions{}, fmt.Errorf("reload-interval-limit must be at least 1 millisecond")
+	}
+	return options, nil
+}
+
+func appMain(options appOptions) error {
+	if options.debug {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
 
-	logFile := ctx.GlobalString("log")
+	logFile := options.logFile
 	if logFile != "" {
 		if output, err := os.OpenFile(logFile, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666); err != nil {
-			logrus.Fatalf("Failed to log to file %s: %v", logFile, err)
+			return fmt.Errorf("open log file %s: %w", logFile, err)
 		} else {
 			logrus.SetOutput(output)
 		}
 	}
 
-	pidFile := ctx.GlobalString("pid-file")
+	pidFile := options.pidFile
 	if pidFile != "" {
 		logrus.Infof("Writing pid %d to %s", os.Getpid(), pidFile)
 		if err := ioutil.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0644); err != nil {
-			logrus.Fatalf("Failed to write pid file %s: %v", pidFile, err)
+			return fmt.Errorf("write pid file %s: %w", pidFile, err)
 		}
 	}
 
 	sc := NewServerConfig(
-		ctx.GlobalString("answers"),
-		ctx.GlobalString("listen"),
-		ctx.GlobalString("listenReload"),
-		ctx.GlobalBool("xff"),
+		options.answersFile,
+		options.listen,
+		options.listenReload,
+		options.enableXff,
 	)
 
-	// Start the server
-	sc.Start()
+	if err := sc.Start(); err != nil {
+		return err
+	}
 
 	go func() {
 		for {
@@ -153,27 +149,32 @@ func appMain(ctx *cli.Context) error {
 		}
 	}()
 
-	if ctx.Bool("subscribe") {
+	if options.subscribe {
 		logrus.Info("Subscribing to events")
-		s := NewSubscriber(os.Getenv("CATTLE_URL"),
-			os.Getenv("CATTLE_ACCESS_KEY"),
-			os.Getenv("CATTLE_SECRET_KEY"),
-			ctx.String("answers"),
-			ctx.Int64("reload-interval-limit"),
+		s, err := NewSubscriber(platformEnvironment("PLATFORM_URL", "CATTLE_URL"),
+			platformEnvironment("PLATFORM_ACCESS_KEY", "CATTLE_ACCESS_KEY"),
+			platformEnvironment("PLATFORM_SECRET_KEY", "CATTLE_SECRET_KEY"),
+			options.answersFile,
+			options.reloadIntervalLimit,
 			sc.SetAnswers)
+		if err != nil {
+			return err
+		}
 		if err := s.Subscribe(); err != nil {
-			logrus.Fatal("Failed to subscribe", err)
+			return fmt.Errorf("subscribe to platform events: %w", err)
 		}
 	}
 
-	go func() {
-		logrus.Info(http.ListenAndServe(":6060", nil))
-	}()
+	return sc.RunServer()
+}
 
-	// Run the server
-	sc.RunServer()
-
-	return nil
+// platformEnvironment prefers the neutral deployment contract while retaining
+// an upgrade-only alias for existing installations. Values are never logged.
+func platformEnvironment(primary, compatibilityAlias string) string {
+	if value := os.Getenv(primary); value != "" {
+		return value
+	}
+	return os.Getenv(compatibilityAlias)
 }
 
 func NewServerConfig(answersFilePath, listen, listenReload string, enableXff bool) *ServerConfig {
@@ -196,15 +197,16 @@ func NewServerConfig(answersFilePath, listen, listenReload string, enableXff boo
 	return sc
 }
 
-func (sc *ServerConfig) Start() {
-	logrus.Infof("Starting rancher-metadata %s", VERSION)
+func (sc *ServerConfig) Start() error {
+	logrus.Infof("Starting metadata-service %s", VERSION)
 	// on the startup, read answers from file (if present)so there is no delay
 	// in serving to the client till the delta update from subscriber
 	if _, err := os.Stat(sc.answersFilePath); err == nil {
 		if err = sc.loadAnswersFromFile(sc.answersFilePath); err != nil {
-			logrus.Fatal("Failed loading data from file")
+			return fmt.Errorf("load answers from file: %w", err)
 		}
 	}
+	return nil
 }
 
 func (sc *ServerConfig) answers() Versions {
@@ -295,7 +297,7 @@ func (sc *ServerConfig) watchHttp() {
 	go http.ListenAndServe(sc.listenReload, sc.reloadRouter)
 }
 
-func (sc *ServerConfig) RunServer() {
+func (sc *ServerConfig) RunServer() error {
 
 	sc.watchSignals()
 	sc.watchHttp()
@@ -319,7 +321,7 @@ func (sc *ServerConfig) RunServer() {
 		Name("Metadata")
 
 	logrus.Info("Listening on ", sc.listen)
-	logrus.Fatal(http.ListenAndServe(sc.listen, sc.router))
+	return http.ListenAndServe(sc.listen, sc.router)
 }
 
 func (sc *ServerConfig) httpReload(w http.ResponseWriter, req *http.Request) {
@@ -337,22 +339,32 @@ func (sc *ServerConfig) httpReload(w http.ResponseWriter, req *http.Request) {
 }
 
 func contentType(req *http.Request) int {
-	str := httputil.NegotiateContentType(req, []string{
-		"text/plain",
-		"application/json",
-		"application/yaml",
-		"application/x-yaml",
-		"text/yaml",
-		"text/x-yaml",
-	}, "text/plain")
-
-	if strings.Contains(str, "json") {
-		return ContentJSON
-	} else if strings.Contains(str, "yaml") {
-		return ContentYAML
-	} else {
-		return ContentText
+	bestType := ContentText
+	bestQuality := -1.0
+	for _, candidate := range strings.Split(strings.ToLower(req.Header.Get("Accept")), ",") {
+		parts := strings.Split(strings.TrimSpace(candidate), ";")
+		quality := 1.0
+		for _, parameter := range parts[1:] {
+			keyValue := strings.SplitN(strings.TrimSpace(parameter), "=", 2)
+			if len(keyValue) == 2 && keyValue[0] == "q" {
+				if parsed, err := strconv.ParseFloat(keyValue[1], 64); err == nil {
+					quality = parsed
+				}
+			}
+		}
+		if quality <= bestQuality {
+			continue
+		}
+		switch parts[0] {
+		case "application/json":
+			bestType, bestQuality = ContentJSON, quality
+		case "application/yaml", "application/x-yaml", "text/yaml", "text/x-yaml":
+			bestType, bestQuality = ContentYAML, quality
+		case "text/plain", "*/*", "":
+			bestType, bestQuality = ContentText, quality
+		}
 	}
+	return bestType
 }
 
 func (sc *ServerConfig) root(w http.ResponseWriter, req *http.Request) {
@@ -455,8 +467,10 @@ func respondError(w http.ResponseWriter, req *http.Request, msg string, statusCo
 
 	switch contentType(req) {
 	case ContentText:
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		http.Error(w, msg, statusCode)
 	case ContentJSON:
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		bytes, err := json.Marshal(obj)
 		if err == nil {
 			http.Error(w, string(bytes), statusCode)
@@ -464,6 +478,7 @@ func respondError(w http.ResponseWriter, req *http.Request, msg string, statusCo
 			http.Error(w, "{\"type\": \"error\", \"message\": \"JSON marshal error\"}", http.StatusInternalServerError)
 		}
 	case ContentYAML:
+		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
 		bytes, err := yaml.Marshal(obj)
 		if err == nil {
 			http.Error(w, string(bytes), statusCode)
@@ -485,6 +500,7 @@ func respondSuccess(w http.ResponseWriter, req *http.Request, val interface{}) {
 }
 
 func respondText(w http.ResponseWriter, req *http.Request, val interface{}) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	if val == nil {
 		fmt.Fprint(w, "")
 		return
@@ -557,6 +573,7 @@ func respondText(w http.ResponseWriter, req *http.Request, val interface{}) {
 func respondJSON(w http.ResponseWriter, req *http.Request, val interface{}) {
 	bytes, err := json.Marshal(val)
 	if err == nil {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Write(bytes)
 	} else {
 		respondError(w, req, "Error serializing to JSON: "+err.Error(), http.StatusInternalServerError)
@@ -566,6 +583,7 @@ func respondJSON(w http.ResponseWriter, req *http.Request, val interface{}) {
 func respondYAML(w http.ResponseWriter, req *http.Request, val interface{}) {
 	bytes, err := yaml.Marshal(val)
 	if err == nil {
+		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
 		w.Write(bytes)
 	} else {
 		respondError(w, req, "Error serializing to YAML: "+err.Error(), http.StatusInternalServerError)

@@ -1,0 +1,39 @@
+#!/bin/bash
+set -euo pipefail
+
+DEFAULT_CA_ROOT=/var/lib/pasturestack/etc/ssl/ca.crt
+UPGRADE_CA_ROOT=/var/lib/rancher/etc/ssl/ca.crt
+SYSTEM_CA_DIR=/usr/share/ca-certificates/pasturestack
+SYSTEM_CA=${SYSTEM_CA_DIR}/platform-ca.crt
+USER_CA_DIR=${XDG_RUNTIME_DIR:-/tmp}/pasturestack-ca
+USER_CA=${USER_CA_DIR}/ca-certificates.crt
+
+if [ -n "${PLATFORM_CA_ROOT:-}" ]; then
+    ca_root=${PLATFORM_CA_ROOT}
+elif [ -f "${DEFAULT_CA_ROOT}" ]; then
+    ca_root=${DEFAULT_CA_ROOT}
+else
+    ca_root=${UPGRADE_CA_ROOT}
+fi
+
+if [ ! -f "${ca_root}" ]; then
+    exit 0
+fi
+
+if [ "$(id -u)" = "0" ]; then
+    mkdir -p "${SYSTEM_CA_DIR}"
+    if [ ! -f "${SYSTEM_CA}" ] || ! cmp -s "${ca_root}" "${SYSTEM_CA}"; then
+        echo "Updating the platform CA certificate." >&2
+        install -m 0644 "${ca_root}" "${SYSTEM_CA}"
+        if ! grep -qxF pasturestack/platform-ca.crt /etc/ca-certificates.conf; then
+            echo pasturestack/platform-ca.crt >> /etc/ca-certificates.conf
+        fi
+        update-ca-certificates >&2
+    fi
+    exit 0
+fi
+
+umask 077
+mkdir -p "${USER_CA_DIR}"
+cat /etc/ssl/certs/ca-certificates.crt "${ca_root}" > "${USER_CA}"
+printf '%s\n' "${USER_CA}"

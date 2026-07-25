@@ -1,3 +1,0 @@
- check process rancher-metadata matching "/var/lib/cattle/bin/rancher-metadata"
-   start program = "/etc/init.d/rancher-metadata start"
-   stop  program = "/etc/init.d/rancher-metadata stop"
