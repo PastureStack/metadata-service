@@ -1,123 +1,77 @@
-rancher-metadata
-===========
+# Metadata Service
 
-[![Build Status](http://ci.rancher.io/api/badge/github.com/rancher/rancher-metadata/status.svg?branch=master)](http://ci.rancher.io/github.com/rancher/rancher-metadata)
+Metadata Service is a source-IP-aware HTTP service for environment, host, service, and workload metadata. It supports dated API views, JSON/YAML/plain-text responses, long polling, file reloads, and an optional platform event subscription.
 
+PastureStack is an independent community effort to preserve, audit, and modernize the Rancher 1.6 ecosystem. It is not affiliated with or endorsed by Rancher Labs or SUSE.
 
-A simple HTTP server that returns EC2-style metadata information that varies depending on the source IP address making the request.  This package contains no Rancher-specific code, but is used in Rancher with an answer file that provide the requesting container information about itself, the service and stack it is a member of, the host it is running on, etc.
+**Upstream:** [`rancher/rancher-metadata`](https://github.com/rancher/rancher-metadata). This GitHub fork retains the upstream Git history, authorship, dates, and license notices unchanged; PastureStack maintenance is consolidated into one commit after the preserved upstream boundary.
 
-# Usage
+## Compatibility contract
+
+- The dated `2015-12-19` and `2016-07-29` views remain available while dependent components migrate.
+- The deployment must expose the neutral service-discovery name `metadata`.
+- Client-specific answers are selected by source IP, with an optional `default` answer set.
+- Long polling uses `wait=true`, `value=<previous-value>`, and an optional bounded `maxWait` value.
+- `X-Forwarded-For` is ignored unless `--xff` is explicitly enabled.
+
+See [COMPATIBILITY.md](COMPATIBILITY.md) before changing paths, answer shapes, event names, or long-poll behavior.
+
+## Run from an answers file
+
 ```bash
-  rancher-metadata --answers /path/to/answers.{yaml|json} [--debug] [--listen [host]:port] [--log path] [--pid-file path] [--xff]
+docker run --rm -p 8080:80 \
+  --mount type=bind,src="$PWD/example/answers.json",dst=/var/lib/pasturestack-metadata/answers.json,readonly \
+  ghcr.io/pasturestack/metadata-service:0.10.5 \
+  metadata-service --answers /var/lib/pasturestack-metadata/answers.json
 ```
 
-# Compile
-```
-  godep go build
-```
+The top level of an answers file is a map of dated versions. Each dated version maps client IP addresses (or `default`) to arbitrary JSON/YAML values. Examples are available under `example/`.
 
-## CLI Options
+The image runs as UID/GID `10001` by default and can bind port 80 through a file capability. A managed system deployment starts the container as root with `NET_ADMIN` only long enough to add `169.254.169.250/32`, then immediately drops to UID/GID `10001`. The image does not require root for file-backed standalone use.
 
-Option      | Default        | Description
-------------|----------------|------------
-`--answers` | ./answers.yaml | Path to a JSON or YAML file with client-specific answers
-`--debug`   | *off*          | Log more debugging info
-`--listen`  | 0.0.0.0:80     | IP address and port to listen on
-`--log`     | *none*         | Output log info to a file path instead of stdout
-`--pid-file`| *none*         | Write the server PID to a file path on startup
-`--xff`     | *off*          | Enable using the `X-Forwarded-For` header to determine source IP
+The Windows Server 2022 Catalog uses
+`ghcr.io/pasturestack/metadata-service-windows:0.10.5`.
+That separately versioned image assigns the same link-local address through
+the Windows networking API and runs the cross-compiled service in subscription
+mode.
 
-## Answers File
+## Platform subscription mode
 
-The answers file provides all the structure that the metadata server responds with.
-  - The top-level must be a map of version numbers, where each version should be an ISO-8601 date (yyyy-mm-dd) for compatibility with Rancher/Amazon EC2-style.
-    - There may be an additional version called `latest` which should be the same as one of the dated version.  If one is not provided, the highest version ASCII-betically will be used as latest.
-  - The 2nd level (top level of each version) must be a map of client IP addresses.  The request IP will be used to look up the appropriate set of answers.
-    - A special key `default` will be checked if no answer is found in a client IP-specific entry.
+Set the following environment variables and add `--subscribe`:
 
-### YAML
-```yaml
-'2015-12-19': &latest
-  '10.1.2.2':
-    key1: value1
-    arbitrarily:
-      nested:
-        - YAML
-        - of
-        - any
-        - type
-        - 42
-        - null
-        - false
-  '192.168.0.2':
-    key1: value2
+- `PLATFORM_URL`
+- `PLATFORM_ACCESS_KEY`
+- `PLATFORM_SECRET_KEY`
+- `PLATFORM_ALLOWED_ORIGINS` (optional comma-separated origins for approved additional regions)
+- `PLATFORM_CA_ROOT` (optional; the container default is `/var/lib/pasturestack/etc/ssl/ca.crt`)
 
-  # "default" is a special key that will be checked if no answer is found in a client IP-specific entry
-  default:
-    key1: value3
+The client uses the compatible `/v1` surface for event subscription and `configcontent/metadata-answers`, while acknowledgements are published through `/v2-beta`. A root URL, `/v1`, or `/v2-beta` input is normalized into those two purpose-specific endpoints. Every HTTP redirect remains on the validated scheme, host, and effective port; credentials are never forwarded across origins. Responses and error messages are bounded and do not include response bodies.
 
-'2015-07-25':
-  # Data for older revision
+Multi-region metadata credentials are supported as in upstream `v0.10.4`. A discovered endpoint on the primary origin is accepted automatically. A different origin is rejected unless its canonical origin is listed in `PLATFORM_ALLOWED_ORIGINS`; use entries such as `https://region.example:8443`, not paths or embedded credentials. Rotated or removed sources are cancelled, isolated from the active snapshot, and cannot persist a rejected update.
 
-latest: *latest
+A managed orchestration deployment must be installed by a reviewed system catalog or an authenticated system API with the stack property `system=true`. The ordinary application-stack form does not set that property. The control plane assigns `metadata-answers` only to an agent-backed metadata provider whose instance is both a system instance and running or starting. A regular stack can appear active while the configuration endpoint still returns `404`. The deployment template must also preserve create-agent, metadata-provider, system-container, and global-scheduling semantics in its compatibility layer.
+
+Existing installations may continue to inject `CATTLE_URL`, `CATTLE_ACCESS_KEY`, and `CATTLE_SECRET_KEY` during an in-place upgrade. The neutral `PLATFORM_*` names always take precedence. The historical CA mount at `/var/lib/rancher/etc/ssl/ca.crt` is also accepted only when the neutral default is absent. These aliases are compatibility inputs, not names for new deployments.
+
+## Build and test
+
+The minimum reviewed toolchain is Go 1.26.5. Earlier 1.26 patch releases contain reachable standard-library vulnerabilities for this service.
+
+```bash
+install -m 0755 /reviewed/docker-cli-29.6.2-linux-amd64 \
+  dist/dependencies/docker-cli-29.6.2-linux-amd64
+make ci
 ```
 
+Set `CROSS=1` when a reviewed build needs both `linux/amd64` and
+`windows/amd64` executables.
 
-## JSON
-```javascript
-{
-  "2015-12-19": {
-    "10.1.2.2": {
-      "key1": "value1",
-      "arbitrarily": {
-        "nested": [
-          "JSON", "of", "any", "type", 42, null, false
-        ]
-      }
-    },
+The containerized build pins Go 1.26.5 by SHA-256, verifies the pre-reviewed Docker 29.6.2 client, runs race tests, `go vet`, formatting, module integrity, license checks, privacy checks, and then packages from an allow-listed temporary context. GitHub CI runs the source-level gates on every `main` update; image publication remains a separate reviewed release action.
 
-    "192.168.0.2": {
-      "key1": "value2"
-    },
+## Security
 
-    # "default" is a special key that will be checked if no answer is found in a client IP-specific entry
-    "default": {
-      "key1": "value3"
-    }
-  },
+Do not expose the loopback reload listener, enable forwarded-address trust without a trusted proxy, or commit answer files containing credentials. See [SECURITY.md](SECURITY.md).
 
-  "2015-07-25": {
-    # Data for older revision
-  },
-}
-```
+## License and attribution
 
-
-## Answering queries
-A query is answered by following the pieces of the path to walk the answers for the requested IP one step at a time.  If the key in the first section of the path is not found or there is no answers entry for the request IP, the `"default"` section is checked.  Defaults are *not* checked if there are client-specific answers they match one (or more) levels of the path.
-
-If the request contains an `Accept` header requesting `application/json`, the response will be the matching subtree as a JSON document.
-
-If the request contains an `Accept` header requesting `{application|text}/{yaml|x-yaml}`, the response will be the matching subtree as a YAML document.
-
-## Contact
-For bugs, questions, comments, corrections, suggestions, etc., open an issue in
- [rancher/rancher](//github.com/rancher/rancher/issues) with a title starting with `[rancher-metadata] `.
-
-Or just [click here](//github.com/rancher/rancher/issues/new?title=%5Brancher-metadata%5D%20) to create a new issue.
-
-License
-=======
-Copyright (c) 2015-2016 [Rancher Labs, Inc.](http://rancher.com)
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-[http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0)
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+The inherited project remains licensed under the terms in [LICENSE](LICENSE). PastureStack does not claim authorship of inherited work. Source provenance is recorded in [ORIGIN.md](ORIGIN.md), and bundled dependency notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and `LICENSES/`.

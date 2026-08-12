@@ -3,66 +3,61 @@ package kicker
 import "sync"
 
 type Kicker struct {
-	sync.Mutex
+	mu         sync.Mutex
+	cond       *sync.Cond
 	f          func()
 	running    bool
-	kicked     bool
+	pending    bool
 	generation int
-	cond       *sync.Cond
 }
 
 func New(f func()) *Kicker {
-	return &Kicker{
-		f:    f,
-		cond: sync.NewCond(&sync.Mutex{}),
-	}
+	kicker := &Kicker{f: f}
+	kicker.cond = sync.NewCond(&kicker.mu)
+	return kicker
 }
 
 func (k *Kicker) Kick() int {
-	k.Lock()
-	defer k.Unlock()
-
-	k.cond.L.Lock()
-	v := k.generation
-	k.cond.L.Unlock()
-
+	k.mu.Lock()
+	defer k.mu.Unlock()
 	if k.running {
-		k.kicked = true
-		return v
+		k.pending = true
+		return k.generation + 2
 	}
-
 	k.running = true
 	go k.run()
-
-	return v
+	return k.generation + 1
 }
 
-func (k *Kicker) Wait(v int) {
-	k.cond.L.Lock()
-	for {
-		if v < k.generation {
-			break
-		}
+func (k *Kicker) Wait(generation int) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	for k.generation < generation {
 		k.cond.Wait()
 	}
-	k.cond.L.Unlock()
+}
+
+func (k *Kicker) WaitIdle() {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	for k.running {
+		k.cond.Wait()
+	}
 }
 
 func (k *Kicker) run() {
-	k.f()
-
-	k.cond.L.Lock()
-	k.generation++
-	k.cond.Broadcast()
-	k.cond.L.Unlock()
-
-	k.Lock()
-	defer k.Unlock()
-
-	if k.kicked {
-		k.kicked = false
-		go k.run()
-	} else {
-		k.running = false
+	for {
+		k.f()
+		k.mu.Lock()
+		k.generation++
+		k.cond.Broadcast()
+		if !k.pending {
+			k.running = false
+			k.cond.Broadcast()
+			k.mu.Unlock()
+			return
+		}
+		k.pending = false
+		k.mu.Unlock()
 	}
 }

@@ -1,3 +1,10 @@
-FROM microsoft/nanoserver:10.0.14393.1593
-COPY rancher-metadata.exe start.ps1 /
-CMD powershell /start.ps1 -subscribe
+# escape=`
+FROM mcr.microsoft.com/windows/nanoserver:ltsc2022
+
+WORKDIR C:\pasturestack
+COPY metadata-service.exe C:\pasturestack\metadata-service.exe
+COPY start.cmd C:\pasturestack\start.cmd
+
+USER ContainerAdministrator
+ENTRYPOINT ["C:\\pasturestack\\start.cmd"]
+CMD ["--subscribe"]

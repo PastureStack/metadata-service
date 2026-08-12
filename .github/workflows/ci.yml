@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: 1.26.5
+          cache: true
+          check-latest: false
+
+      - name: Verify modules and licenses
+        run: |
+          go mod verify
+          bash ./scripts/verify-licenses
+          bash ./scripts/check-build-downloads
+
+      - name: Format and vet
+        run: |
+          test -z "$(gofmt -l -- $(find . -name '*.go' -not -path './vendor/*' -print))"
+          go vet ./...
+
+      - name: Test with race detector
+        run: bash ./scripts/test
+
+      - name: Build supported executables
+        env:
+          CROSS: "1"
+          VERSION_OVERRIDE: "0.10.5"
+        run: bash ./scripts/build

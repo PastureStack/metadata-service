@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+bash -n scripts/build scripts/ci scripts/entry scripts/package scripts/test scripts/validate \
+    scripts/verify-licenses scripts/version package/start.sh package/platform-entrypoint.sh package/update-platform-ca
+env -u VERSION_OVERRIDE -u RELEASE_VERSION -u ARCH bash -u -c \
+    'source scripts/version; test -n "$VERSION"; test "$ARCH" = amd64'
+
+grep -q 'GO_VERSION=1.26.5' Dockerfile.dapper
+grep -q '5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053' Dockerfile.dapper
+grep -q 'docker-cli-29.6.2-linux-amd64' Makefile
+grep -q 'dda0804fca9b37a16e688356049ddf51fdd4c1a435c0a41055ec81cdf121535a' Makefile
+grep -q '5f42ff0a165e3834c4fd73a91b8d41c37a3c0a3475d0101cc13cfcf880ce5978' Makefile
+grep -q 'ubuntu:26.04' package/Dockerfile
+grep -q 'PASTURESTACK_IMAGE_VERSION' package/Dockerfile
+grep -q 'VERSION_OVERRIDE="${TAG}" ./scripts/build' scripts/package
+grep -q 'metadata-service version mismatch' scripts/package
+grep -q 'PASTURESTACK_IMAGE_REVISION' package/Dockerfile
+grep -q 'PASTURESTACK_IMAGE_CREATED' package/Dockerfile
+grep -q 'org.opencontainers.image.revision' package/Dockerfile
+grep -q 'org.opencontainers.image.created' package/Dockerfile
+grep -q 'SOURCE_REVISION=$(git rev-parse HEAD)' scripts/package
+grep -q 'PASTURESTACK_PRIVATE_DENYLIST_FILE' Makefile
+grep -q 'USER 10001:10001' package/Dockerfile
+grep -q 'cap_net_bind_service' package/Dockerfile
+grep -q 'setpriv --reuid=10001 --regid=10001 --init-groups' package/start.sh
+grep -q 'set -- metadata-service "$@"' package/start.sh
+grep -q 'PLATFORM_URL", "CATTLE_URL' main.go
+grep -q 'PLATFORM_ACCESS_KEY", "CATTLE_ACCESS_KEY' main.go
+grep -q 'PLATFORM_SECRET_KEY", "CATTLE_SECRET_KEY' main.go
+grep -q 'PLATFORM_ALLOWED_ORIGINS", "CATTLE_ALLOWED_ORIGINS' main.go
+
+if find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 2>/dev/null | \
+    xargs -0 -r grep -E 'uses:[[:space:]]+[^[:space:]]+@' | \
+    grep -Ev 'uses:[[:space:]]+[^[:space:]]+@[0-9a-f]{40}([[:space:]]|$)'; then
+    echo 'GitHub Actions must be pinned to full commit SHAs' >&2
+    exit 1
+fi
+
+if grep -Eq '(^|[[:space:]])(ADD|RUN).*(curl|wget|https?://)' package/Dockerfile; then
+    echo 'runtime Dockerfile must not fetch arbitrary build inputs' >&2
+    exit 1
+fi
+
+private_denylist=${PASTURESTACK_PRIVATE_DENYLIST_FILE:-}
+if [[ -n "${private_denylist}" ]]; then
+    test -r "${private_denylist}"
+    while IFS= read -r forbidden || [[ -n "${forbidden}" ]]; do
+        [[ -z "${forbidden}" || "${forbidden}" == \#* ]] && continue
+        if grep -RIFq --exclude-dir=.git --exclude-dir=dist --exclude=check-build-downloads \
+            -- "${forbidden}" .; then
+            echo 'private identity or staging data found in the public tree' >&2
+            exit 1
+        fi
+    done < "${private_denylist}"
+fi
+
+if grep -RIq --include='*.go' --exclude-dir=.git 'rancher' .; then
+    echo 'legacy product naming found in executable Go source' >&2
+    exit 1
+fi
+
+echo 'METADATA_BUILD_INPUTS_OK go=1.26.5 ubuntu=26.04 docker=29.6.2 buildx=v0.33 nonroot=10001 local_image_context=1 upgrade_aliases=1'
