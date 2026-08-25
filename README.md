@@ -55,18 +55,18 @@ Existing installations may continue to inject `CATTLE_URL`, `CATTLE_ACCESS_KEY`,
 
 ## Build and test
 
-The minimum reviewed toolchain is Go 1.26.5. Earlier 1.26 patch releases contain reachable standard-library vulnerabilities for this service.
+The minimum reviewed toolchain is Go 1.27.0. Earlier 1.26 patch releases contain reachable standard-library vulnerabilities for this service.
 
 ```bash
-install -m 0755 /reviewed/docker-cli-29.6.2-linux-amd64 \
-  dist/dependencies/docker-cli-29.6.2-linux-amd64
+install -m 0755 /reviewed/docker-cli-29.7.2-linux-amd64 \
+  dist/dependencies/docker-cli-29.7.2-linux-amd64
 make ci
 ```
 
 Set `CROSS=1` when a reviewed build needs both `linux/amd64` and
 `windows/amd64` executables.
 
-The containerized build pins Go 1.26.5 by SHA-256, verifies the pre-reviewed Docker 29.6.2 client, runs race tests, `go vet`, formatting, module integrity, license checks, privacy checks, and then packages from an allow-listed temporary context. GitHub CI runs the source-level gates on every `main` update; image publication remains a separate reviewed release action.
+The containerized build pins Go 1.27.0 by SHA-256, verifies the pre-reviewed Docker 29.7.2 client, runs race tests, `go vet`, formatting, module integrity, license checks, privacy checks, and then packages from an allow-listed temporary context. GitHub CI runs the source-level gates on every `main` update; image publication remains a separate reviewed release action.
 
 ## Security
 

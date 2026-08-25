@@ -9,8 +9,8 @@ DOCKER_BUILD_NETWORK ?= host
 UBUNTU_MIRROR ?= http://archive.ubuntu.com/ubuntu
 BUILDX_BIN ?= /usr/libexec/docker/cli-plugins/docker-buildx
 BUILDX_SHA256 ?= 5f42ff0a165e3834c4fd73a91b8d41c37a3c0a3475d0101cc13cfcf880ce5978
-DOCKER_CLI_BIN ?= $(CURDIR)/dist/dependencies/docker-cli-29.6.2-linux-amd64
-DOCKER_CLI_SHA256 ?= dda0804fca9b37a16e688356049ddf51fdd4c1a435c0a41055ec81cdf121535a
+DOCKER_CLI_BIN ?= $(CURDIR)/dist/dependencies/docker-cli-29.7.2-linux-amd64
+DOCKER_CLI_SHA256 ?= e45381109c685311cf84c5e33a1aca7da81d6b55c0f9aed74091fc08c3a94f13
 
 .dapper:
 >test -x $(BUILDX_BIN)

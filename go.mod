@@ -2,12 +2,12 @@ module github.com/PastureStack/metadata-service
 
 go 1.26.0
 
-toolchain go1.26.5
+toolchain go1.27.0
 
 require (
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
-	github.com/sirupsen/logrus v1.9.4
+	github.com/sirupsen/logrus v1.10.1
 	gopkg.in/yaml.v2 v2.4.0
 )
 
