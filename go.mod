@@ -7,7 +7,7 @@ toolchain go1.27.0
 require (
 	github.com/gorilla/mux v1.8.1
 	github.com/gorilla/websocket v1.5.3
-	github.com/sirupsen/logrus v1.10.1
+	github.com/sirupsen/logrus v1.10.2
 	gopkg.in/yaml.v2 v2.4.0
 )
 
