@@ -16,12 +16,19 @@ PastureStack is an independent community effort to preserve, audit, and moderniz
 
 See [COMPATIBILITY.md](COMPATIBILITY.md) before changing paths, answer shapes, event names, or long-poll behavior.
 
+## Release status
+
+The current Catalog uses Linux image `v0.9.11` and Windows Server 2022 image
+`v0.9.12`. This repository has no GitHub Release. The source
+tree targets the next numeric product candidate, `v0.10.5`; it is not
+published and must not be copied into deployment configuration.
+
 ## Run from an answers file
 
 ```bash
 docker run --rm -p 8080:80 \
   --mount type=bind,src="$PWD/example/answers.json",dst=/var/lib/pasturestack-metadata/answers.json,readonly \
-  ghcr.io/pasturestack/metadata-service:0.10.5 \
+  ghcr.io/pasturestack/metadata-service:v0.9.11 \
   metadata-service --answers /var/lib/pasturestack-metadata/answers.json
 ```
 
@@ -30,10 +37,12 @@ The top level of an answers file is a map of dated versions. Each dated version 
 The image runs as UID/GID `10001` by default and can bind port 80 through a file capability. A managed system deployment starts the container as root with `NET_ADMIN` only long enough to add `169.254.169.250/32`, then immediately drops to UID/GID `10001`. The image does not require root for file-backed standalone use.
 
 The Windows Server 2022 Catalog uses
-`ghcr.io/pasturestack/metadata-service-windows:0.10.5`.
-That separately versioned image assigns the same link-local address through
-the Windows networking API and runs the cross-compiled service in subscription
-mode.
+`ghcr.io/pasturestack/metadata-service-windows:v0.9.12`. That pure numeric
+coordinate is an exact manifest alias of the reviewed Windows build
+(`sha256:e957230b715e7fbebd2c9709d1a3c38be5ee4f8694f8c1c1fda0d4bf27c36836`),
+so the naming correction does not change image bytes. The separately versioned
+image assigns the same link-local address through the Windows networking API
+and runs the cross-compiled service in subscription mode.
 
 ## Platform subscription mode
 
