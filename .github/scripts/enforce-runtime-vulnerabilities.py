@@ -5,6 +5,15 @@ from pathlib import Path
 
 
 def violations(report, ledger, repository):
+    if (not isinstance(report, dict) or report.get("SchemaVersion") != 2
+            or not isinstance(report.get("Results"), list) or not report["Results"]):
+        raise ValueError("missing or malformed Trivy scan results")
+    for result in report["Results"]:
+        if not isinstance(result, dict) or not isinstance(result.get("Target"), str):
+            raise ValueError("malformed Trivy result")
+        for key in ("Vulnerabilities", "Secrets"):
+            if key in result and result[key] is not None and not isinstance(result[key], list):
+                raise ValueError("malformed Trivy findings")
     if ledger.get("repository") != repository:
         raise ValueError("allowlist repository mismatch")
     reviewed = {}

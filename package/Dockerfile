@@ -3,6 +3,9 @@ FROM ubuntu:26.04@sha256:2260313b31c8c011cd2eebe728008efac1b3982be73eb71348ea264
 
 ARG UBUNTU_SNAPSHOT=20260825T000000Z
 
+COPY security/install-ubuntu-security-updates.sh /usr/local/lib/pasturestack/install-ubuntu-security-updates.sh
+COPY security/ubuntu-security-packages.lock /usr/share/pasturestack/ubuntu-security-packages.lock
+
 ADD --checksum=sha256:5b6326f1932cfd7be57130561dc78192f09ed9f58bfbe6606ed0c50510c3b6cd \
     https://archive.ubuntu.com/ubuntu/pool/main/c/ca-certificates/ca-certificates_20260816ubuntu0.26.04.1_all.deb \
     /tmp/ca-certificates.deb
@@ -23,6 +26,8 @@ RUN set -eux; \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         bash /tmp/ca-certificates.deb iproute2 iptables libcap2-bin util-linux && \
     test "$(dpkg-query -W -f='${Version}' ca-certificates)" = '20260816ubuntu0.26.04.1' && \
+    sh /usr/local/lib/pasturestack/install-ubuntu-security-updates.sh /usr/share/pasturestack/ubuntu-security-packages.lock /etc/ssl/certs/ca-certificates.crt && \
+    dpkg-query -W -f='${binary:Package}\t${Version}\n' | LC_ALL=C sort > /usr/share/pasturestack/ubuntu-security-packages.tsv && \
     rm -f /tmp/ca-certificates.deb && \
     rm -rf /var/lib/apt/lists/* && \
     rm -f /usr/bin/pebble

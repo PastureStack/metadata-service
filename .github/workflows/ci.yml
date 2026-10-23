@@ -98,6 +98,8 @@ jobs:
           }
           trap cleanup EXIT
           install -m 0644 package/Dockerfile "$context/Dockerfile"
+          mkdir -p "$context/security"
+          install -m 0644 security/install-ubuntu-security-updates.sh security/ubuntu-security-packages.lock "$context/security/"
           install -m 0755 bin/linux/amd64/metadata-service "$context/metadata-service"
           install -m 0755 package/start.sh package/platform-entrypoint.sh package/update-platform-ca "$context/"
           mkdir -p "$context/licenses/third-party"
@@ -109,6 +111,7 @@ jobs:
           grep -Fx '20260816ubuntu0.26.04.1' evidence/ca-version.txt
           container=$(docker create local/metadata-service:security)
           docker cp "$container:/usr/bin/metadata-service" evidence/product
+          docker cp "$container:/usr/share/pasturestack/ubuntu-security-packages.tsv" evidence/ubuntu-security-packages.tsv
           go version -m evidence/product | tee evidence/product-go-version.txt
           grep -F 'go1.27.3' evidence/product-go-version.txt
 
@@ -124,6 +127,7 @@ jobs:
             --exit-code 0 --format json --output /evidence/image-security.json "$TESTED_IMAGE"
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/evidence:/evidence" \
             "$TRIVY_IMAGE" image --format cyclonedx --output /evidence/image.cdx.json "$TESTED_IMAGE"
+          PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/test_runtime_vulnerability_policy.py
           python3 .github/scripts/enforce-runtime-vulnerabilities.py \
             evidence/image-security.json .github/runtime-unfixed.json \
             --repository "$GITHUB_REPOSITORY"
