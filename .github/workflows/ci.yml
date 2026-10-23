@@ -121,9 +121,12 @@ jobs:
           set -euo pipefail
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/evidence:/evidence" \
             "$TRIVY_IMAGE" image --scanners vuln,secret --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
-            --exit-code 1 --format json --output /evidence/image-security.json "$TESTED_IMAGE"
+            --exit-code 0 --format json --output /evidence/image-security.json "$TESTED_IMAGE"
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/evidence:/evidence" \
             "$TRIVY_IMAGE" image --format cyclonedx --output /evidence/image.cdx.json "$TESTED_IMAGE"
+          python3 .github/scripts/enforce-runtime-vulnerabilities.py \
+            evidence/image-security.json .github/runtime-unfixed.json \
+            --repository "$GITHUB_REPOSITORY"
 
       - name: Publish the tested image once
         id: publish
