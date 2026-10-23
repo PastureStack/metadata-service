@@ -20,24 +20,19 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) before changing paths, answer shapes, e
 
 ## Release status
 
-Current source targets the `v0.10.6` candidate, not a published release; install
-only tags listed as published GitHub releases. A source target is not real-host acceptance, and the
-`v0.10.6` example below applies only after that tag is published.
+Current source targets `v0.10.6`. Install only tags listed in the
+[official published releases](https://github.com/PastureStack/metadata-service/releases).
+A source target alone is not publication or real-host acceptance.
 This update preserves opaque per-dataset change tokens, including the
 platform's `revision-hash` values, instead of coercing them to numeric `0`.
 Long-poll clients can therefore observe local data changes without changing
 their polling protocol. Explicit aggregate-source version overrides, dated
 views, payloads and source-IP authorization remain unchanged.
 
-The published Linux baseline is [v0.10.5](https://github.com/PastureStack/metadata-service/releases/tag/v0.10.5),
-built from producer `9aa4b97c7907493f0c5a5ccf5ca2b708e7bce9f7`.
-The published Linux image is
-`ghcr.io/pasturestack/metadata-service:v0.10.5`, with manifest digest
-`sha256:31f72a3c737a3b67bd1fb7d3c98d1ce728c84c52cad94f1884872f153efc4a01`.
-See the [official publication](https://github.com/PastureStack/metadata-service/actions/runs/39959381046)
-for artifact evidence. Windows Server 2022 remains on `v0.9.12` and was not
-rebuilt for this release. Catalog selection and deployment acceptance remain
-separate.
+Use the selected release's checksum-covered publication evidence for its exact
+producer, image digest, SBOM and provenance. Windows Server 2022 remains on
+`v0.9.12`; the Linux source update does not replace that separately versioned
+image. Catalog selection and deployment acceptance remain separate.
 
 ## Run from an answers file
 
