@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -346,9 +345,6 @@ func MergeVersions(local Versions, external []Versions, version string) Versions
 	if len(merged) == 0 {
 		return merged
 	}
-	if version == "" {
-		version = highestNumericVersion(merged)
-	}
 	environments := make([]interface{}, 0, len(external))
 	for _, versions := range external {
 		if defaults, ok := versions[version3][DEFAULT_KEY].(map[string]interface{}); ok {
@@ -364,35 +360,16 @@ func MergeVersions(local Versions, external []Versions, version string) Versions
 			if metadataVersion == version3 {
 				data["environments"] = cloneValue(environments)
 			}
-			data["version"] = version
+			// Local change tokens are opaque (the platform emits revision-hash),
+			// not sortable integers. Only an explicit aggregate-source override
+			// may replace the token already belonging to this dataset.
+			if version != "" {
+				data["version"] = version
+			}
 		}
 	}
 	merged["latest"] = merged[version3]
 	return merged
-}
-
-func highestNumericVersion(versions Versions) string {
-	highest := int64(-1)
-	for _, metadataVersion := range versionList {
-		for _, value := range versions[metadataVersion] {
-			data, ok := value.(map[string]interface{})
-			if !ok {
-				continue
-			}
-			candidate, ok := data["version"].(string)
-			if !ok {
-				continue
-			}
-			parsed, err := strconv.ParseInt(candidate, 10, 64)
-			if err == nil && parsed > highest {
-				highest = parsed
-			}
-		}
-	}
-	if highest < 0 {
-		return "0"
-	}
-	return strconv.FormatInt(highest, 10)
 }
 
 func cloneVersions(source Versions) Versions {

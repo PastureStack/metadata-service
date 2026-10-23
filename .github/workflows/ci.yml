@@ -50,7 +50,7 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/main
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          test "$RELEASE_TAG" = 'v0.10.5'
+          test "$RELEASE_TAG" = 'v0.10.6'
           test -z "$(git status --porcelain)"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$GITHUB_SHA"
@@ -80,7 +80,7 @@ jobs:
       - name: Build supported executables
         env:
           CROSS: "1"
-          VERSION_OVERRIDE: "0.10.5"
+          VERSION_OVERRIDE: "0.10.6"
         run: bash ./scripts/build
 
       - name: Verify builder and runtime security inputs
@@ -105,13 +105,13 @@ jobs:
           mkdir -p "$context/licenses/third-party"
           install -m 0644 LICENSE COMPATIBILITY.md ORIGIN.md SECURITY.md THIRD_PARTY_NOTICES.md "$context/licenses/"
           cp -a LICENSES/. "$context/licenses/third-party/"
-          docker build --build-arg PASTURESTACK_IMAGE_VERSION=0.10.5 \
+          docker build --build-arg PASTURESTACK_IMAGE_VERSION=0.10.6 \
             --build-arg PASTURESTACK_IMAGE_REVISION="$GITHUB_SHA" \
             --build-arg PASTURESTACK_IMAGE_CREATED="$(git show -s --format=%cI HEAD)" \
             -t local/metadata-service:security "$context"
           mkdir -p evidence
           test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' local/metadata-service:security)" = "$GITHUB_SHA"
-          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' local/metadata-service:security)" = '0.10.5'
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' local/metadata-service:security)" = '0.10.6'
           docker image inspect local/metadata-service:security > evidence/image-inspect.json
           docker run --rm --entrypoint dpkg-query local/metadata-service:security -W '-f=${Version}\n' ca-certificates | tee evidence/ca-version.txt
           grep -Fx '20260816ubuntu0.26.04.1' evidence/ca-version.txt
