@@ -44,6 +44,8 @@ cleanup() {
 trap cleanup EXIT
 
 install -m 0644 package/Dockerfile "${context}/Dockerfile"
+mkdir -p "${context}/security"
+install -m 0644 security/install-ubuntu-security-updates.sh security/ubuntu-security-packages.lock "${context}/security/"
 install -m 0755 bin/metadata-service "${context}/metadata-service"
 install -m 0755 package/start.sh package/platform-entrypoint.sh package/update-platform-ca "${context}/"
 mkdir -p "${context}/licenses/third-party"

@@ -2,7 +2,7 @@ module github.com/PastureStack/metadata-service
 
 go 1.26.0
 
-toolchain go1.27.0
+toolchain go1.27.3
 
 require (
 	github.com/gorilla/mux v1.8.1

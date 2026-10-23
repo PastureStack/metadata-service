@@ -1,5 +1,7 @@
 # Metadata Service
 
+Current source builds use Go 1.27.3 while the Go language minimum remains 1.26.0. Ubuntu 26.04 images install the checksum-pinned `ca-certificates` 20260816ubuntu0.26.04.1 package with only officially fixed, already-installed packages advanced by the reviewed security overlay. These source inputs take effect in newly built artifacts; existing published release coordinates below describe their original artifacts.
+
 Metadata Service is a source-IP-aware HTTP service for environment, host, service, and workload metadata. It supports dated API views, JSON/YAML/plain-text responses, long polling, file reloads, and an optional platform event subscription.
 
 PastureStack is an independent community effort to preserve, audit, and modernize the Rancher 1.6 ecosystem. It is not affiliated with or endorsed by Rancher Labs or SUSE.
@@ -64,18 +66,18 @@ Existing installations may continue to inject `CATTLE_URL`, `CATTLE_ACCESS_KEY`,
 
 ## Build and test
 
-The minimum reviewed toolchain is Go 1.27.0. Earlier 1.26 patch releases contain reachable standard-library vulnerabilities for this service.
+The minimum reviewed toolchain is Go 1.27.3. Earlier 1.26 patch releases contain reachable standard-library vulnerabilities for this service.
 
 ```bash
-install -m 0755 /reviewed/docker-cli-29.7.2-linux-amd64 \
-  dist/dependencies/docker-cli-29.7.2-linux-amd64
+install -m 0755 /reviewed/docker-cli-29.9.2-linux-amd64 \
+  dist/dependencies/docker-cli-29.9.2-linux-amd64
 make ci
 ```
 
 Set `CROSS=1` when a reviewed build needs both `linux/amd64` and
 `windows/amd64` executables.
 
-The containerized build pins Go 1.27.0 by SHA-256, verifies the pre-reviewed Docker 29.7.2 client, runs race tests, `go vet`, formatting, module integrity, license checks, privacy checks, and then packages from an allow-listed temporary context. GitHub CI runs the source-level gates on every `main` update; image publication remains a separate reviewed release action.
+The containerized build pins Go 1.27.3 by SHA-256, verifies the pre-reviewed Docker 29.9.2 client, runs race tests, `go vet`, formatting, module integrity, license checks, privacy checks, and then packages from an allow-listed temporary context. GitHub CI runs the source-level gates on every `main` update; image publication remains a separate reviewed release action.
 
 ## Security
 
@@ -84,3 +86,5 @@ Do not expose the loopback reload listener, enable forwarded-address trust witho
 ## License and attribution
 
 The inherited project remains licensed under the terms in [LICENSE](LICENSE). PastureStack does not claim authorship of inherited work. Source provenance is recorded in [ORIGIN.md](ORIGIN.md), and bundled dependency notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and `LICENSES/`.
+
+Security micro-updates are constrained by `security/ubuntu-security-packages.lock` to the signed Ubuntu 26.04 snapshot of 2026-10-23; the general package snapshot remains unchanged. Builds record the resulting package versions in `/usr/share/pasturestack/ubuntu-security-packages.tsv`. Low/medium findings without an official Ubuntu fix remain recorded by exact package version and PURL in `.github/runtime-unfixed.json`; fixed, high, critical, unknown, and unregistered findings still block publication.

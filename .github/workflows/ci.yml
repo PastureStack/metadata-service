@@ -6,9 +6,18 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: New immutable numeric tag; empty runs verification only
+        required: false
+        default: ''
+        type: string
 
 permissions:
-  contents: read
+  contents: write
+  packages: write
+  id-token: write
+  attestations: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -17,7 +26,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - name: Check out source
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -27,9 +36,32 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: 1.27.0
+          go-version: 1.27.3
           cache: true
           check-latest: false
+
+      - name: Validate manual release request
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = refs/heads/main
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$RELEASE_TAG" = 'v0.10.5'
+          test -z "$(git status --porcelain)"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$GITHUB_SHA"
+          tags="$(gh api --paginate "repos/$GITHUB_REPOSITORY/tags" --jq '.[].name')"
+          if grep -Fxq "$RELEASE_TAG" <<<"$tags"; then
+            echo 'The release tag already exists; refusing to overwrite it' >&2
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs" --jq '
+            [.check_runs[] | select(.name == "Analyze (go)" or .name == "Analyze (actions)")]
+            | group_by(.name) | length == 2 and all(any(.conclusion == "success"))' | grep -Fx true
 
       - name: Verify modules and licenses
         run: |
@@ -50,3 +82,111 @@ jobs:
           CROSS: "1"
           VERSION_OVERRIDE: "0.10.5"
         run: bash ./scripts/build
+
+      - name: Verify builder and runtime security inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build -f Dockerfile.dapper -t local/metadata-builder:security .
+          test "$(docker run --rm --entrypoint go local/metadata-builder:security version)" = 'go version go1.27.3 linux/amd64'
+          test "$(docker run --rm --entrypoint dpkg-query local/metadata-builder:security -W '-f=${Version}' ca-certificates)" = '20260816ubuntu0.26.04.1'
+          context=$(mktemp -d)
+          container=''
+          cleanup() {
+            if [ -n "$container" ]; then docker rm "$container" >/dev/null; fi
+            rm -rf "$context"
+          }
+          trap cleanup EXIT
+          install -m 0644 package/Dockerfile "$context/Dockerfile"
+          mkdir -p "$context/security"
+          install -m 0644 security/install-ubuntu-security-updates.sh security/ubuntu-security-packages.lock "$context/security/"
+          install -m 0755 bin/linux/amd64/metadata-service "$context/metadata-service"
+          install -m 0755 package/start.sh package/platform-entrypoint.sh package/update-platform-ca "$context/"
+          mkdir -p "$context/licenses/third-party"
+          install -m 0644 LICENSE COMPATIBILITY.md ORIGIN.md SECURITY.md THIRD_PARTY_NOTICES.md "$context/licenses/"
+          cp -a LICENSES/. "$context/licenses/third-party/"
+          docker build --build-arg PASTURESTACK_IMAGE_VERSION=0.10.5 -t local/metadata-service:security "$context"
+          mkdir -p evidence
+          docker run --rm --entrypoint dpkg-query local/metadata-service:security -W '-f=${Version}\n' ca-certificates | tee evidence/ca-version.txt
+          grep -Fx '20260816ubuntu0.26.04.1' evidence/ca-version.txt
+          container=$(docker create local/metadata-service:security)
+          docker cp "$container:/usr/bin/metadata-service" evidence/product
+          docker cp "$container:/usr/share/pasturestack/ubuntu-security-packages.tsv" evidence/ubuntu-security-packages.tsv
+          go version -m evidence/product | tee evidence/product-go-version.txt
+          grep -F 'go1.27.3' evidence/product-go-version.txt
+
+      - name: Scan the tested runtime image
+        shell: bash
+        env:
+          TRIVY_IMAGE: ghcr.io/aquasecurity/trivy:0.74.0@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
+          TESTED_IMAGE: local/metadata-service:security
+        run: |
+          set -euo pipefail
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/evidence:/evidence" \
+            "$TRIVY_IMAGE" image --scanners vuln,secret --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
+            --exit-code 0 --format json --output /evidence/image-security.json "$TESTED_IMAGE"
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/evidence:/evidence" \
+            "$TRIVY_IMAGE" image --format cyclonedx --output /evidence/image.cdx.json "$TESTED_IMAGE"
+          PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/test_runtime_vulnerability_policy.py
+          python3 .github/scripts/enforce-runtime-vulnerabilities.py \
+            evidence/image-security.json .github/runtime-unfixed.json \
+            --repository "$GITHUB_REPOSITORY"
+
+      - name: Publish the tested image once
+        id: publish
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          TESTED_IMAGE: local/metadata-service:security
+        run: |
+          set -euo pipefail
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$GITHUB_SHA"
+          remote="ghcr.io/pasturestack/metadata-service:$RELEASE_TAG"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          if docker manifest inspect "$remote" > /dev/null 2> evidence/registry-preflight.txt; then
+            echo 'Image tag already exists; refusing to overwrite it' >&2
+            exit 1
+          fi
+          grep -Ei 'manifest unknown|no such manifest|not found' evidence/registry-preflight.txt
+          docker tag "$TESTED_IMAGE" "$remote"
+          docker push "$remote"
+          reference="$(docker image inspect --format '{{index .RepoDigests 0}}' "$remote")"
+          digest="${reference#*@}"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf 'digest=%s\n' "$digest" >> "$GITHUB_OUTPUT"
+          printf 'image=%s\ndigest=%s\nproducer=%s\n' "$remote" "$digest" "$GITHUB_SHA" > evidence/published.txt
+          (cd evidence && sha256sum published.txt > published.sha256)
+
+      - name: Attest the published image
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ghcr.io/pasturestack/metadata-service
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          push-to-registry: true
+
+      - name: Record the immutable source and release
+        if: github.event_name == 'workflow_dispatch' && inputs.release_tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          tag_sha="$(gh api --method POST "repos/$GITHUB_REPOSITORY/git/tags" \
+            -f tag="$RELEASE_TAG" -f object="$GITHUB_SHA" -f type=commit \
+            -f message="Security refresh $RELEASE_TAG" --jq .sha)"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f ref="refs/tags/$RELEASE_TAG" -f sha="$tag_sha" >/dev/null
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "$RELEASE_TAG" --notes-file evidence/published.txt \
+            evidence/published.txt evidence/published.sha256 evidence/*.json
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: runtime-security-evidence
+          path: evidence/
+          if-no-files-found: error
