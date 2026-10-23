@@ -34,3 +34,5 @@ curl=8.18.0-1ubuntu2.8
 libcurl4t64=8.18.0-1ubuntu2.8
 libssh2-1t64=1.11.1-1ubuntu0.26.04.4
 libcurl3t64-gnutls=8.18.0-1ubuntu2.8
+libc-dev-bin=2.43-2ubuntu2.4
+libexpat1=2.7.4-1ubuntu0.2
