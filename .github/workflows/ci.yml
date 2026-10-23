@@ -105,8 +105,14 @@ jobs:
           mkdir -p "$context/licenses/third-party"
           install -m 0644 LICENSE COMPATIBILITY.md ORIGIN.md SECURITY.md THIRD_PARTY_NOTICES.md "$context/licenses/"
           cp -a LICENSES/. "$context/licenses/third-party/"
-          docker build --build-arg PASTURESTACK_IMAGE_VERSION=0.10.5 -t local/metadata-service:security "$context"
+          docker build --build-arg PASTURESTACK_IMAGE_VERSION=0.10.5 \
+            --build-arg PASTURESTACK_IMAGE_REVISION="$GITHUB_SHA" \
+            --build-arg PASTURESTACK_IMAGE_CREATED="$(git show -s --format=%cI HEAD)" \
+            -t local/metadata-service:security "$context"
           mkdir -p evidence
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' local/metadata-service:security)" = "$GITHUB_SHA"
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' local/metadata-service:security)" = '0.10.5'
+          docker image inspect local/metadata-service:security > evidence/image-inspect.json
           docker run --rm --entrypoint dpkg-query local/metadata-service:security -W '-f=${Version}\n' ca-certificates | tee evidence/ca-version.txt
           grep -Fx '20260816ubuntu0.26.04.1' evidence/ca-version.txt
           container=$(docker create local/metadata-service:security)
