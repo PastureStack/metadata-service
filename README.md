@@ -20,7 +20,16 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) before changing paths, answer shapes, e
 
 ## Release status
 
-The current Linux release is [v0.10.5](https://github.com/PastureStack/metadata-service/releases/tag/v0.10.5),
+Current source targets the `v0.10.6` candidate, not a published release; install
+only tags listed as published GitHub releases. A source target is not real-host acceptance, and the
+`v0.10.6` example below applies only after that tag is published.
+This update preserves opaque per-dataset change tokens, including the
+platform's `revision-hash` values, instead of coercing them to numeric `0`.
+Long-poll clients can therefore observe local data changes without changing
+their polling protocol. Explicit aggregate-source version overrides, dated
+views, payloads and source-IP authorization remain unchanged.
+
+The published Linux baseline is [v0.10.5](https://github.com/PastureStack/metadata-service/releases/tag/v0.10.5),
 built from producer `9aa4b97c7907493f0c5a5ccf5ca2b708e7bce9f7`.
 The published Linux image is
 `ghcr.io/pasturestack/metadata-service:v0.10.5`, with manifest digest
@@ -35,7 +44,7 @@ separate.
 ```bash
 docker run --rm -p 8080:80 \
   --mount type=bind,src="$PWD/example/answers.json",dst=/var/lib/pasturestack-metadata/answers.json,readonly \
-  ghcr.io/pasturestack/metadata-service:v0.10.5 \
+  ghcr.io/pasturestack/metadata-service:v0.10.6 \
   metadata-service --answers /var/lib/pasturestack-metadata/answers.json
 ```
 
