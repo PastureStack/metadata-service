@@ -1,8 +1,8 @@
 # Metadata Service
 
-Linux candidate **`v0.10.7`** integrates shared Ubuntu 26.04 security backports for already-installed packages while preserving the selected coreutils provider. It is unpublished; the last published Linux release is [v0.10.6](https://github.com/PastureStack/metadata-service/releases/tag/v0.10.6).
+Linux runtime **`v0.10.7`** integrates shared Ubuntu 26.04 security backports for already-installed packages while preserving the selected coreutils provider.
 
-Build and image examples below target the candidate. Publication requires completed bundle provenance and the normal final-image release gates. The image retains bundle manifests, source inputs and install/verify receipts under `/usr/share/pasturestack/security/ubuntu-backports/`.
+The image retains bundle manifests, source inputs and installation receipts under `/usr/share/pasturestack/security/ubuntu-backports/`.
 
 Metadata Service is a source-IP-aware HTTP service for environment, host, service, and workload metadata. It supports dated API views, JSON/YAML/plain-text responses, long polling, file reloads, and an optional platform event subscription.
 
