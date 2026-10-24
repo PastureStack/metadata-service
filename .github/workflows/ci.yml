@@ -50,7 +50,7 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/main
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          test "$RELEASE_TAG" = 'v0.10.6'
+          test "$RELEASE_TAG" = 'v0.10.7'
           test -z "$(git status --porcelain)"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$GITHUB_SHA"
@@ -80,7 +80,7 @@ jobs:
       - name: Build supported executables
         env:
           CROSS: "1"
-          VERSION_OVERRIDE: "0.10.6"
+          VERSION_OVERRIDE: "0.10.7"
         run: bash ./scripts/build
 
       - name: Verify builder and runtime security inputs
@@ -105,19 +105,21 @@ jobs:
           mkdir -p "$context/licenses/third-party"
           install -m 0644 LICENSE COMPATIBILITY.md ORIGIN.md SECURITY.md THIRD_PARTY_NOTICES.md "$context/licenses/"
           cp -a LICENSES/. "$context/licenses/third-party/"
-          docker build --build-arg PASTURESTACK_IMAGE_VERSION=0.10.6 \
+          docker build --build-arg PASTURESTACK_IMAGE_VERSION=0.10.7 \
             --build-arg PASTURESTACK_IMAGE_REVISION="$GITHUB_SHA" \
             --build-arg PASTURESTACK_IMAGE_CREATED="$(git show -s --format=%cI HEAD)" \
             -t local/metadata-service:security "$context"
           mkdir -p evidence
           test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' local/metadata-service:security)" = "$GITHUB_SHA"
-          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' local/metadata-service:security)" = '0.10.6'
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' local/metadata-service:security)" = '0.10.7'
           docker image inspect local/metadata-service:security > evidence/image-inspect.json
           docker run --rm --entrypoint dpkg-query local/metadata-service:security -W '-f=${Version}\n' ca-certificates | tee evidence/ca-version.txt
           grep -Fx '20260816ubuntu0.26.04.1' evidence/ca-version.txt
           container=$(docker create local/metadata-service:security)
           docker cp "$container:/usr/bin/metadata-service" evidence/product
           docker cp "$container:/usr/share/pasturestack/ubuntu-security-packages.tsv" evidence/ubuntu-security-packages.tsv
+          docker cp "$container:/usr/share/pasturestack/security/ubuntu-backports" evidence/ubuntu-backports
+          (cd evidence/ubuntu-backports && sha256sum --check SHA256SUMS)
           go version -m evidence/product | tee evidence/product-go-version.txt
           grep -F 'go1.27.3' evidence/product-go-version.txt
 
@@ -128,15 +130,46 @@ jobs:
           TESTED_IMAGE: local/metadata-service:security
         run: |
           set -euo pipefail
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/evidence:/evidence" \
-            "$TRIVY_IMAGE" image --scanners vuln,secret --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
+          cache="$RUNNER_TEMP/ubuntu-backports-trivy-cache"
+          mkdir -p "$cache"
+          docker run --rm -v "$cache:/root/.cache/trivy" "$TRIVY_IMAGE" image --download-db-only
+          # Retain the untouched all-severity raw report and the actual image SBOM.
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$cache:/root/.cache/trivy" -v "$PWD/evidence:/evidence" "$TRIVY_IMAGE" \
+            image --skip-db-update --scanners vuln,secret --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
             --exit-code 0 --format json --output /evidence/image-security.json "$TESTED_IMAGE"
-          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v "$PWD/evidence:/evidence" \
-            "$TRIVY_IMAGE" image --format cyclonedx --output /evidence/image.cdx.json "$TESTED_IMAGE"
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$cache:/root/.cache/trivy" -v "$PWD/evidence:/evidence" "$TRIVY_IMAGE" \
+            image --skip-db-update --format cyclonedx --output /evidence/image.cdx.json "$TESTED_IMAGE"
+          bundle_image='ghcr.io/pasturestack/ubuntu-security-backports:v0.1.0@sha256:2742a3d429e4e14bc587f6dedc51ded4246cf90bbaedcd86c67d0885e32a6f2a'
+          mkdir -p evidence/bundle-tools
+          bundle_container=$(docker create "$bundle_image" unused)
+          trap 'docker rm "$bundle_container" >/dev/null' EXIT
+          docker cp "$bundle_container:/out/verify-consumer-evidence.py" evidence/bundle-tools/verify-consumer-evidence.py
+          docker cp "$bundle_container:/out/SHA256SUMS" evidence/bundle-tools/SHA256SUMS
+          docker rm "$bundle_container" >/dev/null
+          trap - EXIT
+          (cd evidence/bundle-tools && \
+            test "$(grep -Ec '^[0-9a-f]{64}  verify-consumer-evidence\.py$' SHA256SUMS)" -eq 1 && \
+            grep -E '^[0-9a-f]{64}  verify-consumer-evidence\.py$' SHA256SUMS | sha256sum --check -)
+          python3 evidence/bundle-tools/verify-consumer-evidence.py \
+            --evidence-dir evidence/ubuntu-backports --sbom evidence/image.cdx.json \
+            --bundle-checksums evidence/bundle-tools/SHA256SUMS \
+            --expected-bundle-digest 'sha256:2742a3d429e4e14bc587f6dedc51ded4246cf90bbaedcd86c67d0885e32a6f2a' > evidence/ubuntu-backports-validation.json
+          # Only native Trivy interprets the exact qualified OpenVEX statements.
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$cache:/root/.cache/trivy" -v "$PWD/evidence:/evidence" "$TRIVY_IMAGE" \
+            image --skip-db-update --scanners vuln,secret --severity UNKNOWN,LOW,MEDIUM,HIGH,CRITICAL \
+            --vex /evidence/ubuntu-backports/openvex.json --exit-code 0 --format json \
+            --output /evidence/image-security.effective.json "$TESTED_IMAGE"
           PYTHONDONTWRITEBYTECODE=1 python3 .github/scripts/test_runtime_vulnerability_policy.py
           python3 .github/scripts/enforce-runtime-vulnerabilities.py \
-            evidence/image-security.json .github/runtime-unfixed.json \
+            evidence/image-security.effective.json .github/runtime-unfixed.json \
             --repository "$GITHUB_REPOSITORY"
+          tar -cf evidence/ubuntu-backports-evidence.tar -C evidence ubuntu-backports
+          sha256sum evidence/image-security.json evidence/image-security.effective.json \
+            evidence/image.cdx.json evidence/ubuntu-backports-validation.json \
+            evidence/ubuntu-backports-evidence.tar >> evidence/SHA256SUMS
 
       - name: Publish the tested image once
         id: publish
@@ -188,7 +221,7 @@ jobs:
             -f ref="refs/tags/$RELEASE_TAG" -f sha="$tag_sha" >/dev/null
           gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "$RELEASE_TAG" --notes-file evidence/published.txt \
-            evidence/published.txt evidence/published.sha256 evidence/*.json
+            evidence/published.txt evidence/published.sha256 evidence/*.json evidence/ubuntu-backports-evidence.tar
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
