@@ -1,6 +1,8 @@
 # Metadata Service
 
-Current source builds use Go 1.27.3 while the Go language minimum remains 1.26.0. Ubuntu 26.04 images install the checksum-pinned `ca-certificates` 20260816ubuntu0.26.04.1 package with only officially fixed, already-installed packages advanced by the reviewed security overlay. These source inputs take effect in newly built artifacts; existing published release coordinates below describe their original artifacts.
+Linux runtime **`v0.10.7`** integrates shared Ubuntu 26.04 security backports for already-installed packages while preserving the selected coreutils provider.
+
+The image retains bundle manifests, source inputs and installation receipts under `/usr/share/pasturestack/security/ubuntu-backports/`.
 
 Metadata Service is a source-IP-aware HTTP service for environment, host, service, and workload metadata. It supports dated API views, JSON/YAML/plain-text responses, long polling, file reloads, and an optional platform event subscription.
 
@@ -18,28 +20,12 @@ PastureStack is an independent community effort to preserve, audit, and moderniz
 
 See [COMPATIBILITY.md](COMPATIBILITY.md) before changing paths, answer shapes, event names, or long-poll behavior.
 
-## Release status
-
-Current source targets `v0.10.6`. Install only tags listed in the
-[official published releases](https://github.com/PastureStack/metadata-service/releases).
-A source target alone is not publication or real-host acceptance.
-This update preserves opaque per-dataset change tokens, including the
-platform's `revision-hash` values, instead of coercing them to numeric `0`.
-Long-poll clients can therefore observe local data changes without changing
-their polling protocol. Explicit aggregate-source version overrides, dated
-views, payloads and source-IP authorization remain unchanged.
-
-Use the selected release's checksum-covered publication evidence for its exact
-producer, image digest, SBOM and provenance. Windows Server 2022 remains on
-`v0.9.12`; the Linux source update does not replace that separately versioned
-image. Catalog selection and deployment acceptance remain separate.
-
 ## Run from an answers file
 
 ```bash
 docker run --rm -p 8080:80 \
   --mount type=bind,src="$PWD/example/answers.json",dst=/var/lib/pasturestack-metadata/answers.json,readonly \
-  ghcr.io/pasturestack/metadata-service:v0.10.6 \
+  ghcr.io/pasturestack/metadata-service:v0.10.7 \
   metadata-service --answers /var/lib/pasturestack-metadata/answers.json
 ```
 
@@ -47,13 +33,11 @@ The top level of an answers file is a map of dated versions. Each dated version 
 
 The image runs as UID/GID `10001` by default and can bind port 80 through a file capability. A managed system deployment starts the container as root with `NET_ADMIN` only long enough to add `169.254.169.250/32`, then immediately drops to UID/GID `10001`. The image does not require root for file-backed standalone use.
 
-The Windows Server 2022 Catalog uses
-`ghcr.io/pasturestack/metadata-service-windows:v0.9.12`. That pure numeric
-coordinate is an exact manifest alias of the reviewed Windows build
-(`sha256:e957230b715e7fbebd2c9709d1a3c38be5ee4f8694f8c1c1fda0d4bf27c36836`),
-so the naming correction does not change image bytes. The separately versioned
-image assigns the same link-local address through the Windows networking API
-and runs the cross-compiled service in subscription mode.
+The separately versioned Windows Server 2022 Catalog image remains
+`ghcr.io/pasturestack/metadata-service-windows:v0.9.12`; it is not rebuilt or
+revalidated by this Linux preparation. It assigns the same link-local address
+through the Windows networking API and runs the cross-compiled service in
+subscription mode.
 
 ## Platform subscription mode
 
