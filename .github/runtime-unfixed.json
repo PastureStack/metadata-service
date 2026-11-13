@@ -484,6 +484,105 @@
       "officialEvidence": "https://git.launchpad.net/ubuntu-cve-tracker/plain/active/CVE-2026-89162",
       "reason": "Canonical Ubuntu 26.04 status: resolute_pcre2: needed. No official resolute fixed package is available; keep tracking.",
       "checkedAt": "2026-10-23"
+    },
+    {
+      "severity": "MEDIUM",
+      "package": "bsdutils",
+      "id": "CVE-2026-78408",
+      "purl": "pkg:deb/ubuntu/bsdutils@2.41.3-3ubuntu2.2?arch=amd64&distro=ubuntu-26.04&epoch=1",
+      "version": "1:2.41.3-3ubuntu2.2",
+      "status": "no_official_fix",
+      "officialEvidence": "https://raw.githubusercontent.com/canonical/ubuntu-security-notices/28d50cac38ffe058a044db97525174487ff9f67d/osv/cve/2026/UBUNTU-CVE-2026-78408.json",
+      "reason": "Canonical OSV lists the exact Ubuntu 26.04 util-linux binary without a fixed range endpoint.",
+      "checkedAt": "2026-11-13"
+    },
+    {
+      "severity": "MEDIUM",
+      "package": "libblkid1",
+      "id": "CVE-2026-78408",
+      "purl": "pkg:deb/ubuntu/libblkid1@2.41.3-3ubuntu2.2?arch=amd64&distro=ubuntu-26.04",
+      "version": "2.41.3-3ubuntu2.2",
+      "status": "no_official_fix",
+      "officialEvidence": "https://raw.githubusercontent.com/canonical/ubuntu-security-notices/28d50cac38ffe058a044db97525174487ff9f67d/osv/cve/2026/UBUNTU-CVE-2026-78408.json",
+      "reason": "Canonical OSV lists the exact Ubuntu 26.04 util-linux binary without a fixed range endpoint.",
+      "checkedAt": "2026-11-13"
+    },
+    {
+      "severity": "MEDIUM",
+      "package": "libmount1",
+      "id": "CVE-2026-78408",
+      "purl": "pkg:deb/ubuntu/libmount1@2.41.3-3ubuntu2.2?arch=amd64&distro=ubuntu-26.04",
+      "version": "2.41.3-3ubuntu2.2",
+      "status": "no_official_fix",
+      "officialEvidence": "https://raw.githubusercontent.com/canonical/ubuntu-security-notices/28d50cac38ffe058a044db97525174487ff9f67d/osv/cve/2026/UBUNTU-CVE-2026-78408.json",
+      "reason": "Canonical OSV lists the exact Ubuntu 26.04 util-linux binary without a fixed range endpoint.",
+      "checkedAt": "2026-11-13"
+    },
+    {
+      "severity": "MEDIUM",
+      "package": "libsmartcols1",
+      "id": "CVE-2026-78408",
+      "purl": "pkg:deb/ubuntu/libsmartcols1@2.41.3-3ubuntu2.2?arch=amd64&distro=ubuntu-26.04",
+      "version": "2.41.3-3ubuntu2.2",
+      "status": "no_official_fix",
+      "officialEvidence": "https://raw.githubusercontent.com/canonical/ubuntu-security-notices/28d50cac38ffe058a044db97525174487ff9f67d/osv/cve/2026/UBUNTU-CVE-2026-78408.json",
+      "reason": "Canonical OSV lists the exact Ubuntu 26.04 util-linux binary without a fixed range endpoint.",
+      "checkedAt": "2026-11-13"
+    },
+    {
+      "severity": "MEDIUM",
+      "package": "libuuid1",
+      "id": "CVE-2026-78408",
+      "purl": "pkg:deb/ubuntu/libuuid1@2.41.3-3ubuntu2.2?arch=amd64&distro=ubuntu-26.04",
+      "version": "2.41.3-3ubuntu2.2",
+      "status": "no_official_fix",
+      "officialEvidence": "https://raw.githubusercontent.com/canonical/ubuntu-security-notices/28d50cac38ffe058a044db97525174487ff9f67d/osv/cve/2026/UBUNTU-CVE-2026-78408.json",
+      "reason": "Canonical OSV lists the exact Ubuntu 26.04 util-linux binary without a fixed range endpoint.",
+      "checkedAt": "2026-11-13"
+    },
+    {
+      "severity": "MEDIUM",
+      "package": "login",
+      "id": "CVE-2026-78408",
+      "purl": "pkg:deb/ubuntu/login@4.16.0-2%2Breally2.41.3-3ubuntu2.2?arch=amd64&distro=ubuntu-26.04&epoch=1",
+      "version": "1:4.16.0-2+really2.41.3-3ubuntu2.2",
+      "status": "no_official_fix",
+      "officialEvidence": "https://raw.githubusercontent.com/canonical/ubuntu-security-notices/28d50cac38ffe058a044db97525174487ff9f67d/osv/cve/2026/UBUNTU-CVE-2026-78408.json",
+      "reason": "Canonical OSV lists the exact Ubuntu 26.04 util-linux binary without a fixed range endpoint.",
+      "checkedAt": "2026-11-13"
+    },
+    {
+      "severity": "MEDIUM",
+      "package": "mount",
+      "id": "CVE-2026-78408",
+      "purl": "pkg:deb/ubuntu/mount@2.41.3-3ubuntu2.2?arch=amd64&distro=ubuntu-26.04",
+      "version": "2.41.3-3ubuntu2.2",
+      "status": "no_official_fix",
+      "officialEvidence": "https://raw.githubusercontent.com/canonical/ubuntu-security-notices/28d50cac38ffe058a044db97525174487ff9f67d/osv/cve/2026/UBUNTU-CVE-2026-78408.json",
+      "reason": "Canonical OSV lists the exact Ubuntu 26.04 util-linux binary without a fixed range endpoint.",
+      "checkedAt": "2026-11-13"
+    },
+    {
+      "severity": "MEDIUM",
+      "package": "perl-base",
+      "id": "CVE-2026-9538",
+      "purl": "pkg:deb/ubuntu/perl-base@5.40.1-7ubuntu0.4?arch=amd64&distro=ubuntu-26.04",
+      "version": "5.40.1-7ubuntu0.4",
+      "status": "no_official_fix",
+      "officialEvidence": "https://raw.githubusercontent.com/canonical/ubuntu-security-notices/28d50cac38ffe058a044db97525174487ff9f67d/osv/cve/2026/UBUNTU-CVE-2026-9538.json",
+      "reason": "Canonical OSV lists the exact Ubuntu 26.04 perl binary without a fixed range endpoint.",
+      "checkedAt": "2026-11-13"
+    },
+    {
+      "severity": "MEDIUM",
+      "package": "util-linux",
+      "id": "CVE-2026-78408",
+      "purl": "pkg:deb/ubuntu/util-linux@2.41.3-3ubuntu2.2?arch=amd64&distro=ubuntu-26.04",
+      "version": "2.41.3-3ubuntu2.2",
+      "status": "no_official_fix",
+      "officialEvidence": "https://raw.githubusercontent.com/canonical/ubuntu-security-notices/28d50cac38ffe058a044db97525174487ff9f67d/osv/cve/2026/UBUNTU-CVE-2026-78408.json",
+      "reason": "Canonical OSV lists the exact Ubuntu 26.04 util-linux binary without a fixed range endpoint.",
+      "checkedAt": "2026-11-13"
     }
   ]
 }

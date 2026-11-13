@@ -8,8 +8,8 @@ bash -n scripts/build scripts/ci scripts/entry scripts/package scripts/test scri
 env -u VERSION_OVERRIDE -u RELEASE_VERSION -u ARCH bash -u -c \
     'source scripts/version; test -n "$VERSION"; test "$ARCH" = amd64'
 
-grep -q 'GO_VERSION=1.27.3' Dockerfile.dapper
-grep -q '65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40' Dockerfile.dapper
+grep -q 'GO_VERSION=1.27.4' Dockerfile.dapper
+grep -q '7226736c2339719cda28fbf3a54d71aa63bcefe376e98cef00034268dab24840' Dockerfile.dapper
 grep -q 'docker-cli-29.9.2-linux-amd64' Makefile
 grep -q '6c71cfe71faff949a602946a4df4799b563232e79d0b8b6fd343d0ef081c9621' Makefile
 grep -q '5f42ff0a165e3834c4fd73a91b8d41c37a3c0a3475d0101cc13cfcf880ce5978' Makefile
@@ -39,10 +39,17 @@ if find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 
     exit 1
 fi
 
-if grep -Eq '(^|[[:space:]])(ADD|RUN).*(curl|wget|https?://)' package/Dockerfile; then
-    echo 'runtime Dockerfile must not fetch arbitrary build inputs' >&2
-    exit 1
-fi
+# Permit only the three exact, checksum-pinned Canonical glibc inputs.
+readarray -t runtime_downloads < <(grep -E '^[[:space:]]*(ADD|RUN).*(curl|wget|https?://)' package/Dockerfile)
+expected_downloads=(
+    'ADD --checksum=sha256:be83aefc14597fba683031a520f303950a7338b95d74decbe625faa51c49933e https://security.ubuntu.com/ubuntu/pool/main/g/glibc/libc6_2.43-2ubuntu2.7_amd64.deb /tmp/official-glibc/libc6.deb'
+    'ADD --checksum=sha256:c0393ea4fa3c45cefe0351db369d3a4a459edc8045856f2e3612ca17e77b2797 https://security.ubuntu.com/ubuntu/pool/main/g/glibc/libc-bin_2.43-2ubuntu2.7_amd64.deb /tmp/official-glibc/libc-bin.deb'
+    'ADD --checksum=sha256:408ba056d39651c2489b59522a614276d7a96020c6a401e73cd0da7d771764b0 https://security.ubuntu.com/ubuntu/pool/main/g/glibc/libc-gconv-modules-extra_2.43-2ubuntu2.7_amd64.deb /tmp/official-glibc/libc-gconv-modules-extra.deb'
+)
+test "${#runtime_downloads[@]}" -eq "${#expected_downloads[@]}"
+for i in "${!expected_downloads[@]}"; do
+    test "${runtime_downloads[$i]}" = "${expected_downloads[$i]}"
+done
 
 private_denylist=${PASTURESTACK_PRIVATE_DENYLIST_FILE:-}
 if [[ -n "${private_denylist}" ]]; then
@@ -62,4 +69,4 @@ if grep -RIq --include='*.go' --exclude-dir=.git 'rancher' .; then
     exit 1
 fi
 
-echo 'METADATA_BUILD_INPUTS_OK go=1.27.3 ubuntu=26.04 docker=29.9.2 buildx=v0.33 nonroot=10001 local_image_context=1 upgrade_aliases=1'
+echo 'METADATA_BUILD_INPUTS_OK go=1.27.4 ubuntu=26.04 docker=29.9.2 buildx=v0.33 nonroot=10001 local_image_context=1 upgrade_aliases=1'

@@ -36,7 +36,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: 1.27.3
+          go-version: 1.27.4
           cache: true
           check-latest: false
 
@@ -50,7 +50,7 @@ jobs:
           set -euo pipefail
           test "$GITHUB_REF" = refs/heads/main
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          test "$RELEASE_TAG" = 'v0.10.7'
+          test "$RELEASE_TAG" = 'v0.10.8'
           test -z "$(git status --porcelain)"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)" = "$GITHUB_SHA"
@@ -80,7 +80,7 @@ jobs:
       - name: Build supported executables
         env:
           CROSS: "1"
-          VERSION_OVERRIDE: "0.10.7"
+          VERSION_OVERRIDE: "0.10.8"
         run: bash ./scripts/build
 
       - name: Verify builder and runtime security inputs
@@ -88,8 +88,8 @@ jobs:
         run: |
           set -euo pipefail
           docker build -f Dockerfile.dapper -t local/metadata-builder:security .
-          test "$(docker run --rm --entrypoint go local/metadata-builder:security version)" = 'go version go1.27.3 linux/amd64'
-          test "$(docker run --rm --entrypoint dpkg-query local/metadata-builder:security -W '-f=${Version}' ca-certificates)" = '20260816ubuntu0.26.04.1'
+          test "$(docker run --rm --entrypoint go local/metadata-builder:security version)" = 'go version go1.27.4 linux/amd64'
+          test "$(docker run --rm --entrypoint dpkg-query local/metadata-builder:security -W '-f=${Version}' ca-certificates)" = '20260816ubuntu0.26.04.2'
           context=$(mktemp -d)
           container=''
           cleanup() {
@@ -105,23 +105,27 @@ jobs:
           mkdir -p "$context/licenses/third-party"
           install -m 0644 LICENSE COMPATIBILITY.md ORIGIN.md SECURITY.md THIRD_PARTY_NOTICES.md "$context/licenses/"
           cp -a LICENSES/. "$context/licenses/third-party/"
-          docker build --build-arg PASTURESTACK_IMAGE_VERSION=0.10.7 \
+          docker build --target qualified_backports --build-arg PASTURESTACK_IMAGE_VERSION=0.10.8 \
+            --build-arg PASTURESTACK_IMAGE_REVISION="$GITHUB_SHA" \
+            --build-arg PASTURESTACK_IMAGE_CREATED="$(git show -s --format=%cI HEAD)" \
+            -t local/metadata-service:security-backports "$context"
+          docker build --build-arg PASTURESTACK_IMAGE_VERSION=0.10.8 \
             --build-arg PASTURESTACK_IMAGE_REVISION="$GITHUB_SHA" \
             --build-arg PASTURESTACK_IMAGE_CREATED="$(git show -s --format=%cI HEAD)" \
             -t local/metadata-service:security "$context"
           mkdir -p evidence
           test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' local/metadata-service:security)" = "$GITHUB_SHA"
-          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' local/metadata-service:security)" = '0.10.7'
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.version"}}' local/metadata-service:security)" = '0.10.8'
           docker image inspect local/metadata-service:security > evidence/image-inspect.json
           docker run --rm --entrypoint dpkg-query local/metadata-service:security -W '-f=${Version}\n' ca-certificates | tee evidence/ca-version.txt
-          grep -Fx '20260816ubuntu0.26.04.1' evidence/ca-version.txt
+          grep -Fx '20260816ubuntu0.26.04.2' evidence/ca-version.txt
           container=$(docker create local/metadata-service:security)
           docker cp "$container:/usr/bin/metadata-service" evidence/product
           docker cp "$container:/usr/share/pasturestack/ubuntu-security-packages.tsv" evidence/ubuntu-security-packages.tsv
           docker cp "$container:/usr/share/pasturestack/security/ubuntu-backports" evidence/ubuntu-backports
           (cd evidence/ubuntu-backports && sha256sum --check SHA256SUMS)
           go version -m evidence/product | tee evidence/product-go-version.txt
-          grep -F 'go1.27.3' evidence/product-go-version.txt
+          grep -F 'go1.27.4' evidence/product-go-version.txt
 
       - name: Scan the tested runtime image
         shell: bash
@@ -141,6 +145,10 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
             -v "$cache:/root/.cache/trivy" -v "$PWD/evidence:/evidence" "$TRIVY_IMAGE" \
             image --skip-db-update --format cyclonedx --output /evidence/image.cdx.json "$TESTED_IMAGE"
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$cache:/root/.cache/trivy" -v "$PWD/evidence:/evidence" "$TRIVY_IMAGE" \
+            image --skip-db-update --format cyclonedx --output /evidence/backport-stage.cdx.json "$TESTED_IMAGE-backports"
+          python3 .github/scripts/verify-official-glibc.py evidence/backport-stage.cdx.json evidence/image.cdx.json
           bundle_image='ghcr.io/pasturestack/ubuntu-security-backports:v0.1.0@sha256:2742a3d429e4e14bc587f6dedc51ded4246cf90bbaedcd86c67d0885e32a6f2a'
           mkdir -p evidence/bundle-tools
           bundle_container=$(docker create "$bundle_image" unused)
@@ -153,7 +161,7 @@ jobs:
             test "$(grep -Ec '^[0-9a-f]{64}  verify-consumer-evidence\.py$' SHA256SUMS)" -eq 1 && \
             grep -E '^[0-9a-f]{64}  verify-consumer-evidence\.py$' SHA256SUMS | sha256sum --check -)
           python3 evidence/bundle-tools/verify-consumer-evidence.py \
-            --evidence-dir evidence/ubuntu-backports --sbom evidence/image.cdx.json \
+            --evidence-dir evidence/ubuntu-backports --sbom evidence/backport-stage.cdx.json \
             --bundle-checksums evidence/bundle-tools/SHA256SUMS \
             --expected-bundle-digest 'sha256:2742a3d429e4e14bc587f6dedc51ded4246cf90bbaedcd86c67d0885e32a6f2a' > evidence/ubuntu-backports-validation.json
           # Only native Trivy interprets the exact qualified OpenVEX statements.
