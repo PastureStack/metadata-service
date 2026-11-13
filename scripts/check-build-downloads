@@ -39,10 +39,17 @@ if find .github/workflows -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 
     exit 1
 fi
 
-if grep -Eq '(^|[[:space:]])(ADD|RUN).*(curl|wget|https?://)' package/Dockerfile; then
-    echo 'runtime Dockerfile must not fetch arbitrary build inputs' >&2
-    exit 1
-fi
+# Permit only the three exact, checksum-pinned Canonical glibc inputs.
+readarray -t runtime_downloads < <(grep -E '^[[:space:]]*(ADD|RUN).*(curl|wget|https?://)' package/Dockerfile)
+expected_downloads=(
+    'ADD --checksum=sha256:be83aefc14597fba683031a520f303950a7338b95d74decbe625faa51c49933e https://security.ubuntu.com/ubuntu/pool/main/g/glibc/libc6_2.43-2ubuntu2.7_amd64.deb /tmp/official-glibc/libc6.deb'
+    'ADD --checksum=sha256:c0393ea4fa3c45cefe0351db369d3a4a459edc8045856f2e3612ca17e77b2797 https://security.ubuntu.com/ubuntu/pool/main/g/glibc/libc-bin_2.43-2ubuntu2.7_amd64.deb /tmp/official-glibc/libc-bin.deb'
+    'ADD --checksum=sha256:408ba056d39651c2489b59522a614276d7a96020c6a401e73cd0da7d771764b0 https://security.ubuntu.com/ubuntu/pool/main/g/glibc/libc-gconv-modules-extra_2.43-2ubuntu2.7_amd64.deb /tmp/official-glibc/libc-gconv-modules-extra.deb'
+)
+test "${#runtime_downloads[@]}" -eq "${#expected_downloads[@]}"
+for i in "${!expected_downloads[@]}"; do
+    test "${runtime_downloads[$i]}" = "${expected_downloads[$i]}"
+done
 
 private_denylist=${PASTURESTACK_PRIVATE_DENYLIST_FILE:-}
 if [[ -n "${private_denylist}" ]]; then
