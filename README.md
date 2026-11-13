@@ -1,6 +1,6 @@
 # Metadata Service
 
-Linux runtime **`v0.10.7`** integrates shared Ubuntu 26.04 security backports for already-installed packages while preserving the selected coreutils provider.
+Linux runtime **`v0.10.8`** uses Go 1.27.4, Ubuntu 26.04 APT 3.2.1ubuntu0.1 and glibc 2.43-2ubuntu2.7. See the [release and SBOM](https://github.com/PastureStack/metadata-service/releases/tag/v0.10.8).
 
 The image retains bundle manifests, source inputs and installation receipts under `/usr/share/pasturestack/security/ubuntu-backports/`.
 
@@ -25,7 +25,7 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) before changing paths, answer shapes, e
 ```bash
 docker run --rm -p 8080:80 \
   --mount type=bind,src="$PWD/example/answers.json",dst=/var/lib/pasturestack-metadata/answers.json,readonly \
-  ghcr.io/pasturestack/metadata-service:v0.10.7 \
+  ghcr.io/pasturestack/metadata-service:v0.10.8 \
   metadata-service --answers /var/lib/pasturestack-metadata/answers.json
 ```
 
